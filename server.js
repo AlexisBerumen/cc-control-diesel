@@ -188,16 +188,21 @@ async function syncMotiveDrivers(accessToken) {
     total = Number(data.total || data.pagination?.total || data.data?.total || users.length);
     received += users.length;
     for (const user of users) {
-      if (String(user.role || '').toLowerCase() !== 'driver') continue;
-      const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.name || user.full_name || user.username || user.email;
-      if (!user.id || !name) continue;
-      const motiveId = String(user.id);
+      const roleCandidates = [user.role, user.user_role, user.userRole, ...(Array.isArray(user.roles) ? user.roles : [])];
+      const roles = roleCandidates.flatMap((role) => typeof role === 'object' && role ? [role.name, role.key, role.type, role.role] : [role]).filter(Boolean).map((role) => String(role).toLowerCase());
+      if (roles.length && !roles.some((role) => role.includes('driver'))) continue;
+      const person = user.driver && typeof user.driver === 'object' ? user.driver : user;
+      const name = [person.first_name || person.firstName || user.first_name || user.firstName, person.last_name || person.lastName || user.last_name || user.lastName].filter(Boolean).join(' ').trim() || person.name || person.full_name || person.fullName || user.name || user.full_name || user.fullName || user.username || user.email || user.email_address || user.emailAddress;
+      const sourceId = user.id || user.user_id || user.userId || person.id;
+      if (!sourceId || !name) continue;
+      const motiveId = String(sourceId);
       motiveDriverIds.push(motiveId);
-      const active = !['inactive', 'deactivated', 'deleted'].includes(String(user.status || '').toLowerCase());
+      const status = typeof user.status === 'object' && user.status ? user.status.name || user.status.value : user.status;
+      const active = !['inactive', 'deactivated', 'deleted'].includes(String(status || '').toLowerCase());
       await pool.query(`INSERT INTO drivers (id, motive_driver_id, name, email, active, motive_updated_at)
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (motive_driver_id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email, active = EXCLUDED.active, motive_updated_at = EXCLUDED.motive_updated_at`, [
-        `motive-driver-${motiveId}`, motiveId, cleanText(name, 120), cleanText(user.email || '', 160) || null, active, user.updated_at || new Date().toISOString()
+        `motive-driver-${motiveId}`, motiveId, cleanText(name, 120), cleanText(user.email || user.email_address || user.emailAddress || '', 160) || null, active, user.updated_at || user.updatedAt || new Date().toISOString()
       ]);
       synced += 1;
     }
