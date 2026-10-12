@@ -36,13 +36,16 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS fuel_records (
       record_id BIGSERIAL PRIMARY KEY, id TEXT NOT NULL UNIQUE, folio TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       unit_id TEXT NOT NULL REFERENCES units(id), unit_number TEXT NOT NULL, identifier TEXT NOT NULL,
-      odometer INTEGER NOT NULL CHECK (odometer > 0), liters NUMERIC(12,2) NOT NULL CHECK (liters > 0), amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+      odometer INTEGER NOT NULL CHECK (odometer > 0), liters NUMERIC(12,2) NOT NULL CHECK (liters > 0), amount NUMERIC(12,2) CHECK (amount IS NULL OR amount > 0),
       station TEXT NOT NULL, ticket_file TEXT NOT NULL, odometer_file TEXT NOT NULL
     );
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_vehicle_id TEXT UNIQUE;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer NUMERIC(12,2);
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_unit TEXT;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_updated_at TIMESTAMPTZ;
+    ALTER TABLE fuel_records ALTER COLUMN amount DROP NOT NULL;
+    ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_amount_check;
+    ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_amount_check CHECK (amount IS NULL OR amount > 0);
     CREATE TABLE IF NOT EXISTS motive_connection (
       id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id), encrypted_access_token TEXT NOT NULL,
       encrypted_refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
@@ -110,14 +113,14 @@ async function syncMotiveVehicles() {
   const accessToken = await getMotiveAccessToken();
   let page = 1, total = Infinity, matched = 0, received = 0, vehiclesFound = 0, missingNumber = 0, missingOdometer = 0, responseShape = [], motiveEndpoint = 'v2';
   while ((page - 1) * 100 < total) {
-    let response = await fetch(`https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'true', 'X-Time-Zone': 'America/Mexico_City' } });
+    let response = await fetch(`https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'false', 'X-Time-Zone': 'America/Mexico_City' } });
     let data = await response.json();
     if (!response.ok) throw new Error(data.error || data.message || 'No fue posible consultar los vehículos de Motive.');
     // Motive has returned both direct and data-wrapped lists across API versions.
     let vehicles = Array.isArray(data) ? data : data.vehicles || data.vehicle_locations || data.data?.vehicles || data.data?.vehicle_locations || data.data?.items || data.data || [];
     if (!Array.isArray(vehicles)) throw new Error(`Motive no devolvio una lista de vehiculos. Campos recibidos: ${Object.keys(data).join(', ') || 'ninguno'}.`);
     if (!vehicles.length && page === 1) {
-      response = await fetch(`https://api.gomotive.com/v1/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'true', 'X-Time-Zone': 'America/Mexico_City' } });
+      response = await fetch(`https://api.gomotive.com/v1/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'false', 'X-Time-Zone': 'America/Mexico_City' } });
       data = await response.json();
       if (!response.ok) throw new Error(data.error || data.message || 'Motive no permitio consultar las ubicaciones v1.');
       vehicles = Array.isArray(data) ? data : data.vehicles || data.vehicle_locations || data.data?.vehicles || data.data?.vehicle_locations || data.data?.items || data.data || [];
@@ -134,7 +137,7 @@ async function syncMotiveVehicles() {
       const reading = location.true_odometer ?? location.odometer ?? vehicleDetails.true_odometer ?? vehicleDetails.odometer;
       if (!number) { missingNumber += 1; continue; }
       if (!Number.isFinite(Number(reading))) { missingOdometer += 1; continue; }
-      const updated = await pool.query('UPDATE units SET motive_vehicle_id = $1, motive_odometer = $2, motive_odometer_unit = $3, motive_odometer_updated_at = $4 WHERE LOWER(number) = LOWER($5)', [String(vehicleDetails.id || vehicle.id), Number(reading), 'km', location.located_at || new Date().toISOString(), number]);
+      const updated = await pool.query('UPDATE units SET motive_vehicle_id = $1, motive_odometer = $2, motive_odometer_unit = $3, motive_odometer_updated_at = $4 WHERE LOWER(number) = LOWER($5)', [String(vehicleDetails.id || vehicle.id), Number(reading), 'mi', location.located_at || new Date().toISOString(), number]);
       if (updated.rowCount) matched += 1;
       received += 1;
     }
@@ -194,9 +197,9 @@ async function handleApi(request, response, url) {
   }
   if (url.pathname === '/api/records' && request.method === 'POST') {
     const body = await readJson(request);
-    const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), liters = Number(body.liters), amount = Number(body.amount);
+    const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), liters = Number(body.liters), amount = body.amount === null || body.amount === '' || body.amount === undefined ? null : Number(body.amount);
     const station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180);
-    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(liters) || liters <= 0 || !Number.isFinite(amount) || amount <= 0 || !station || !ticketFile || !odometerFile) { sendJson(response, 400, { error: 'Los datos de la carga están incompletos o no son válidos.' }); return true; }
+    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(liters) || liters <= 0 || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !station || !ticketFile || !odometerFile) { sendJson(response, 400, { error: 'Los datos de la carga están incompletos o no son válidos.' }); return true; }
     const unitResult = await pool.query('SELECT id, number, identifier FROM units WHERE id = $1', [body.unitId]);
     if (!unitResult.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada no existe.' }); return true; }
     const unit = unitResult.rows[0], client = await pool.connect();
