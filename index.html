@@ -49,8 +49,13 @@
           <div class="section-title"><span class="step">2</span><div><h2>Datos de la carga</h2><p>Usa los valores que aparecen en el ticket o bomba.</p></div></div>
           <div class="field-grid">
             <div class="full-width">
-              <label for="driver-name">Nombre del chofer</label>
-              <input id="driver-name" name="driverName" type="text" maxlength="120" autocomplete="name" placeholder="Ej. Juan Pérez" required />
+              <label for="driver-search">Nombre del chofer</label>
+              <div class="autocomplete">
+                <input id="driver-search" name="driverSearch" type="text" autocomplete="off" placeholder="Escribe el nombre del chofer" aria-describedby="driver-help" required />
+                <div id="driver-options" class="suggestions" role="listbox" hidden></div>
+              </div>
+              <p id="driver-help" class="field-help">Selecciona un chofer registrado en Motive.</p>
+              <div id="selected-driver" class="unit-confirmation" hidden></div>
               <p id="driver-error" class="error" role="alert"></p>
             </div>
             <div>

@@ -13,7 +13,7 @@ const maxGallonsPerLoad = 300;
 let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
 // This is the least-privilege scope needed to retrieve each vehicle's current odometer.
-const motiveScope = 'locations.vehicle_locations_list';
+const motiveScope = 'locations.vehicle_locations_list users.read';
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 function sendJson(response, status, data) {
@@ -42,6 +42,10 @@ async function initializeDatabase() {
       odometer INTEGER NOT NULL CHECK (odometer > 0), gallons NUMERIC(12,2) NOT NULL CHECK (gallons > 0 AND gallons <= 300), amount NUMERIC(12,2) CHECK (amount IS NULL OR amount > 0),
       driver_name TEXT NOT NULL, station TEXT NOT NULL, ticket_file TEXT NOT NULL, odometer_file TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS drivers (
+      id TEXT PRIMARY KEY, motive_driver_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, email TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE, motive_updated_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_vehicle_id TEXT UNIQUE;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer NUMERIC(12,2);
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_unit TEXT;
@@ -56,6 +60,7 @@ async function initializeDatabase() {
       END IF;
     END $$;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS driver_name TEXT;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS driver_id TEXT REFERENCES drivers(id);
     UPDATE fuel_records SET driver_name = 'No registrado' WHERE driver_name IS NULL;
     ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
@@ -164,8 +169,43 @@ async function syncMotiveVehiclesInternal() {
     if (!vehicles.length) break;
     page += 1;
   }
+  let driverSync;
+  try { driverSync = await syncMotiveDrivers(accessToken); }
+  catch (error) { driverSync = { driversReceived: 0, driversSynced: 0, driverSyncError: error.message }; }
   await pool.query('UPDATE motive_connection SET last_synced_at = NOW() WHERE id = TRUE');
-  return { vehiclesReceived: vehiclesFound, vehiclesWithOdometer: received, unitsMatched: matched, unitsWithoutMatch: Math.max(received - matched, 0), missingNumber, missingOdometer, motiveEndpoint, motiveResponseFields: responseShape };
+  return { vehiclesReceived: vehiclesFound, vehiclesWithOdometer: received, unitsMatched: matched, unitsWithoutMatch: Math.max(received - matched, 0), missingNumber, missingOdometer, motiveEndpoint, motiveResponseFields: responseShape, ...driverSync };
+}
+
+async function syncMotiveDrivers(accessToken) {
+  let page = 1, total = Infinity, received = 0, synced = 0;
+  const motiveDriverIds = [];
+  while ((page - 1) * 100 < total) {
+    const response = await fetch(`https://api.gomotive.com/v1/users?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Time-Zone': 'America/Mexico_City' } });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || data.message || 'Motive no permitio consultar los choferes. Verifica el permiso Drivers and Fleet Managers.');
+    const users = Array.isArray(data) ? data : data.users || data.data?.users || data.data || [];
+    if (!Array.isArray(users)) throw new Error('Motive no devolvio una lista de usuarios.');
+    total = Number(data.total || data.pagination?.total || data.data?.total || users.length);
+    received += users.length;
+    for (const user of users) {
+      if (String(user.role || '').toLowerCase() !== 'driver') continue;
+      const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.name || user.full_name || user.username || user.email;
+      if (!user.id || !name) continue;
+      const motiveId = String(user.id);
+      motiveDriverIds.push(motiveId);
+      const active = !['inactive', 'deactivated', 'deleted'].includes(String(user.status || '').toLowerCase());
+      await pool.query(`INSERT INTO drivers (id, motive_driver_id, name, email, active, motive_updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (motive_driver_id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email, active = EXCLUDED.active, motive_updated_at = EXCLUDED.motive_updated_at`, [
+        `motive-driver-${motiveId}`, motiveId, cleanText(name, 120), cleanText(user.email || '', 160) || null, active, user.updated_at || new Date().toISOString()
+      ]);
+      synced += 1;
+    }
+    if (!users.length) break;
+    page += 1;
+  }
+  if (motiveDriverIds.length) await pool.query('UPDATE drivers SET active = FALSE WHERE motive_driver_id <> ALL($1::text[])', [motiveDriverIds]);
+  return { driversReceived: received, driversSynced: synced };
 }
 
 async function handleApi(request, response, url) {
@@ -192,7 +232,7 @@ async function handleApi(request, response, url) {
     if (!stateResult.rowCount) { sendHtml(response, 400, '<h1>Autorización expirada</h1><p>Vuelve a iniciar la conexión desde el sistema.</p>'); return true; }
     const tokens = await requestMotiveToken({ grant_type: 'authorization_code', code });
     await saveMotiveTokens(tokens);
-    sendHtml(response, 200, '<h1>Motive conectado</h1><p>La autorización se guardó de forma segura. Ahora abre <code>/api/motive/sync</code> para importar las unidades y odómetros.</p>'); return true;
+    sendHtml(response, 200, '<h1>Motive conectado</h1><p>La autorización se guardó de forma segura. Ahora abre <code>/api/motive/sync</code> para importar las unidades, odómetros y choferes.</p>'); return true;
   }
   if (url.pathname === '/api/motive/sync' && request.method === 'GET') {
     if (!motiveConfigured()) { sendJson(response, 503, { error: 'Falta configurar Motive en Railway.' }); return true; }
@@ -211,6 +251,10 @@ async function handleApi(request, response, url) {
     catch (error) { if (error.code === '23505') sendJson(response, 409, { error: 'Ese número de unidad ya está registrado.' }); else throw error; }
     return true;
   }
+  if (url.pathname === '/api/drivers' && request.method === 'GET') {
+    const result = await pool.query('SELECT id, name FROM drivers WHERE active = TRUE ORDER BY name');
+    sendJson(response, 200, result.rows); return true;
+  }
   if (url.pathname === '/api/records' && request.method === 'GET') {
     const result = await pool.query('SELECT id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile" FROM fuel_records ORDER BY created_at ASC');
     sendJson(response, 200, result.rows); return true;
@@ -218,14 +262,16 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/records' && request.method === 'POST') {
     const body = await readJson(request);
     const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), gallons = Number(body.gallons), amount = body.amount === null || body.amount === '' || body.amount === undefined ? null : Number(body.amount);
-    const driverName = cleanText(body.driverName, 120), station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180);
-    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !driverName || !station || !ticketFile || !odometerFile) { sendJson(response, 400, { error: `Los datos de la carga están incompletos o no son válidos. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
+    const driverId = cleanText(body.driverId, 100), station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180);
+    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !driverId || !station || !ticketFile || !odometerFile) { sendJson(response, 400, { error: `Datos de carga incompletos o no válidos. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
     const unitResult = await pool.query('SELECT id, number, identifier FROM units WHERE id = $1', [body.unitId]);
     if (!unitResult.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada no existe.' }); return true; }
-    const unit = unitResult.rows[0], client = await pool.connect();
+    const driverResult = await pool.query('SELECT id, name FROM drivers WHERE id = $1 AND active = TRUE', [driverId]);
+    if (!driverResult.rowCount) { sendJson(response, 400, { error: 'Selecciona un chofer válido de la lista.' }); return true; }
+    const unit = unitResult.rows[0], driver = driverResult.rows[0], client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driverName, odometer, gallons, amount, station, ticketFile, odometerFile]);
+      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, ticketFile, odometerFile]);
       const row = inserted.rows[0], folio = `DC-${new Date(row.created_at).getFullYear()}-${String(row.record_id).padStart(5, '0')}`;
       const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile"', [folio, row.record_id]);
       await client.query('COMMIT'); sendJson(response, 201, saved.rows[0]);
