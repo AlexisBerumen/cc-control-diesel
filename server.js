@@ -9,6 +9,7 @@ const publicDirectory = __dirname;
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }) : null;
 let databaseReady = false;
 const motiveSyncIntervalMinutes = Math.max(15, Number(process.env.MOTIVE_SYNC_INTERVAL_MINUTES || 60));
+const maxGallonsPerLoad = 300;
 let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
 // This is the least-privilege scope needed to retrieve each vehicle's current odometer.
@@ -38,8 +39,8 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS fuel_records (
       record_id BIGSERIAL PRIMARY KEY, id TEXT NOT NULL UNIQUE, folio TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       unit_id TEXT NOT NULL REFERENCES units(id), unit_number TEXT NOT NULL, identifier TEXT NOT NULL,
-      odometer INTEGER NOT NULL CHECK (odometer > 0), liters NUMERIC(12,2) NOT NULL CHECK (liters > 0), amount NUMERIC(12,2) CHECK (amount IS NULL OR amount > 0),
-      station TEXT NOT NULL, ticket_file TEXT NOT NULL, odometer_file TEXT NOT NULL
+      odometer INTEGER NOT NULL CHECK (odometer > 0), gallons NUMERIC(12,2) NOT NULL CHECK (gallons > 0 AND gallons <= 300), amount NUMERIC(12,2) CHECK (amount IS NULL OR amount > 0),
+      driver_name TEXT NOT NULL, station TEXT NOT NULL, ticket_file TEXT NOT NULL, odometer_file TEXT NOT NULL
     );
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_vehicle_id TEXT UNIQUE;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer NUMERIC(12,2);
@@ -48,6 +49,17 @@ async function initializeDatabase() {
     ALTER TABLE fuel_records ALTER COLUMN amount DROP NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_amount_check;
     ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_amount_check CHECK (amount IS NULL OR amount > 0);
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fuel_records' AND column_name = 'liters')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fuel_records' AND column_name = 'gallons') THEN
+        ALTER TABLE fuel_records RENAME COLUMN liters TO gallons;
+      END IF;
+    END $$;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS driver_name TEXT;
+    UPDATE fuel_records SET driver_name = 'No registrado' WHERE driver_name IS NULL;
+    ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
+    ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
+    ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_gallons_check CHECK (gallons > 0 AND gallons <= 300);
     CREATE TABLE IF NOT EXISTS motive_connection (
       id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id), encrypted_access_token TEXT NOT NULL,
       encrypted_refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
@@ -200,22 +212,22 @@ async function handleApi(request, response, url) {
     return true;
   }
   if (url.pathname === '/api/records' && request.method === 'GET') {
-    const result = await pool.query('SELECT id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, odometer, liters, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile" FROM fuel_records ORDER BY created_at ASC');
+    const result = await pool.query('SELECT id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile" FROM fuel_records ORDER BY created_at ASC');
     sendJson(response, 200, result.rows); return true;
   }
   if (url.pathname === '/api/records' && request.method === 'POST') {
     const body = await readJson(request);
-    const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), liters = Number(body.liters), amount = body.amount === null || body.amount === '' || body.amount === undefined ? null : Number(body.amount);
-    const station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180);
-    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(liters) || liters <= 0 || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !station || !ticketFile || !odometerFile) { sendJson(response, 400, { error: 'Los datos de la carga están incompletos o no son válidos.' }); return true; }
+    const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), gallons = Number(body.gallons), amount = body.amount === null || body.amount === '' || body.amount === undefined ? null : Number(body.amount);
+    const driverName = cleanText(body.driverName, 120), station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180);
+    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !driverName || !station || !ticketFile || !odometerFile) { sendJson(response, 400, { error: `Los datos de la carga están incompletos o no son válidos. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
     const unitResult = await pool.query('SELECT id, number, identifier FROM units WHERE id = $1', [body.unitId]);
     if (!unitResult.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada no existe.' }); return true; }
     const unit = unitResult.rows[0], client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, odometer, liters, amount, station, ticket_file, odometer_file) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, odometer, liters, amount, station, ticketFile, odometerFile]);
+      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driverName, odometer, gallons, amount, station, ticketFile, odometerFile]);
       const row = inserted.rows[0], folio = `DC-${new Date(row.created_at).getFullYear()}-${String(row.record_id).padStart(5, '0')}`;
-      const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, odometer, liters, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile"', [folio, row.record_id]);
+      const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile"', [folio, row.record_id]);
       await client.query('COMMIT'); sendJson(response, 201, saved.rows[0]);
     } catch (error) { await client.query('ROLLBACK'); if (error.code === '23505') sendJson(response, 409, { error: 'Esta carga ya fue registrada.' }); else throw error; }
     finally { client.release(); }

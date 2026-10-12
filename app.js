@@ -31,7 +31,7 @@ function renderUnitCatalog() {
 function renderRecords() {
   const body = $('#records-body');
   if (!records.length) { body.innerHTML = '<tr class="empty"><td colspan="7">Aún no hay cargas registradas.</td></tr>'; return; }
-  body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.plates)}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.liters)} L</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td><span class="status">Completo</span></td></tr>`).join('');
+  body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(r.plates)}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td><span class="status">Completo</span></td></tr>`).join('');
 }
 function setUnit(unit) {
   selectedUnit = unit;
@@ -63,8 +63,12 @@ function validate(show = true) {
   if (!odometer) { if (show) setError('#odometer-error', 'Indica el kilometraje actual.'); valid = false; }
   else if (previous && odometer < previous) { if (show) setError('#odometer-error', `No puede ser menor al último registro (${number(previous)} millas).`); valid = false; }
   else setError('#odometer-error', '');
-  const liters = Number($('#liters').value);
-  if (!liters || liters <= 0) { if (show) setError('#liters-error', 'Indica litros mayores a cero.'); valid = false; } else setError('#liters-error', '');
+  const driverName = $('#driver-name').value.trim();
+  if (!driverName) { if (show) setError('#driver-error', 'Indica el nombre del chofer.'); valid = false; } else setError('#driver-error', '');
+  const gallons = Number($('#gallons').value);
+  if (!gallons || gallons <= 0) { if (show) setError('#gallons-error', 'Indica galones mayores a cero.'); valid = false; }
+  else if (gallons > 300) { if (show) setError('#gallons-error', 'Máximo permitido: 300 galones por carga.'); valid = false; }
+  else setError('#gallons-error', '');
   const amountValue = $('#amount').value.trim(), amount = Number(amountValue);
   if (amountValue && (!amount || amount <= 0)) { if (show) setError('#amount-error', 'El importe debe ser mayor a cero o déjalo vacío para bomba C&C.'); valid = false; } else setError('#amount-error', '');
   if (!$('#station').value.trim()) { if (show) setError('#station-error', 'Indica la estación de servicio.'); valid = false; } else setError('#station-error', '');
@@ -72,17 +76,17 @@ function validate(show = true) {
   return valid;
 }
 function updateReview() {
-  const liters = Number($('#liters').value), amountValue = $('#amount').value.trim(), amount = amountValue ? Number(amountValue) : null, odo = Number($('#odometer').value);
+  const gallons = Number($('#gallons').value), amountValue = $('#amount').value.trim(), amount = amountValue ? Number(amountValue) : null, odo = Number($('#odometer').value), driverName = $('#driver-name').value.trim();
   const data = [
-    ['Unidad', selectedUnit ? `${selectedUnit.number} · ${selectedUnit.plates}` : '—'],
-    ['Odómetro', odo ? `${number(odo)} mi` : '—'], ['Litros', liters ? `${number(liters)} L` : '—'],
-    ['Importe', amount ? money(amount) : 'Bomba C&C / no aplica'], ['Precio por litro', liters && amount ? money(amount / liters) : 'No aplica'],
+    ['Unidad', selectedUnit ? `${selectedUnit.number} · ${selectedUnit.plates}` : '—'], ['Chofer', driverName || '—'],
+    ['Odómetro', odo ? `${number(odo)} mi` : '—'], ['Galones', gallons ? `${number(gallons)} gal` : '—'],
+    ['Importe', amount ? money(amount) : 'Bomba C&C / no aplica'], ['Precio por galón', gallons && amount ? money(amount / gallons) : 'No aplica'],
     ['Evidencias', $('#ticket-photo').files.length && $('#odometer-photo').files.length ? '2 de 2 adjuntas ✓' : `${$('#ticket-photo').files.length + $('#odometer-photo').files.length} de 2 adjuntas`]
   ];
   $('#review-list').innerHTML = data.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join('');
-  const price = liters && amount ? amount / liters : 0;
+  const price = gallons && amount ? amount / gallons : 0;
   $('#price-output').hidden = !price;
-  $('#price-output').textContent = price ? `Precio calculado: ${money(price)} por litro` : '';
+  $('#price-output').textContent = price ? `Precio calculado: ${money(price)} por galón` : '';
 }
 function showToast(message) { const toast = $('#toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 3800); }
 function resetFuelForm() {
@@ -99,20 +103,20 @@ $('#unit-search').addEventListener('input', () => {
 });
 $('#unit-options').addEventListener('click', e => { const button = e.target.closest('[data-id]'); if (button) setUnit(units.find(u => u.id === button.dataset.id)); });
 document.addEventListener('click', e => { if (!e.target.closest('.autocomplete')) $('#unit-options').hidden = true; });
-['odometer','liters','amount','station','ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('input', updateReview));
+['driver-name','odometer','gallons','amount','station','ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('input', updateReview));
 ['ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('change', e => { const box = $(`#${id}-box`); const name = e.target.files[0]?.name; box.classList.toggle('has-file', Boolean(name)); box.querySelector('.file-name').textContent = name || 'Tomar o seleccionar foto'; updateReview(); }));
 
 $('#fuel-form').addEventListener('submit', e => {
   e.preventDefault(); if (!validate()) { showToast('Revisa los campos marcados antes de continuar.'); return; }
   const amountValue = $('#amount').value.trim();
-  const values = [['Unidad', `${selectedUnit.number} · ${selectedUnit.plates}`], ['Odómetro', `${number($('#odometer').value)} mi`], ['Litros', `${number($('#liters').value)} L`], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica'], ['Estación', $('#station').value.trim()]];
+  const values = [['Unidad', `${selectedUnit.number} · ${selectedUnit.plates}`], ['Chofer', $('#driver-name').value.trim()], ['Odómetro', `${number($('#odometer').value)} mi`], ['Galones', `${number($('#gallons').value)} gal`], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica'], ['Estación', $('#station').value.trim()]];
   $('#dialog-summary').innerHTML = values.map(([k,v]) => `<p><span>${k}</span><strong>${esc(v)}</strong></p>`).join(''); $('#confirm-dialog').showModal();
 });
 $('#confirm-button').addEventListener('click', async e => {
   e.preventDefault();
   const now = new Date();
   const amountValue = $('#amount').value.trim();
-  const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, odometer: Number($('#odometer').value), liters: Number($('#liters').value), amount: amountValue ? Number(amountValue) : null, station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name };
+  const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, driverName: $('#driver-name').value.trim(), odometer: Number($('#odometer').value), gallons: Number($('#gallons').value), amount: amountValue ? Number(amountValue) : null, station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name };
   let saved;
   try {
     const response = await fetch('/api/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) });
@@ -126,7 +130,7 @@ $('#confirm-button').addEventListener('click', async e => {
   records.push(saved); save(STORAGE.records, records); $('#confirm-dialog').close(); renderRecords(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada correctamente.`); location.hash = '#registros';
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
-$('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Identificador','Odómetro (millas)','Litros','Importe (MXN)','Estación','Ticket','Foto odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.plates,r.odometer,r.liters,r.amount ?? '',r.station,r.ticketFile,r.odometerFile]); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
+$('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Ticket','Foto odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile]); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
 
 $('#unit-form').addEventListener('submit', async (event) => {
   event.preventDefault();

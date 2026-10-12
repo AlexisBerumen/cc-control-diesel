@@ -48,6 +48,11 @@
           <div class="divider"></div>
           <div class="section-title"><span class="step">2</span><div><h2>Datos de la carga</h2><p>Usa los valores que aparecen en el ticket o bomba.</p></div></div>
           <div class="field-grid">
+            <div class="full-width">
+              <label for="driver-name">Nombre del chofer</label>
+              <input id="driver-name" name="driverName" type="text" maxlength="120" autocomplete="name" placeholder="Ej. Juan Pérez" required />
+              <p id="driver-error" class="error" role="alert"></p>
+            </div>
             <div>
               <label for="odometer">Odómetro (millas)</label>
               <input id="odometer" name="odometer" type="number" min="1" step="1" inputmode="numeric" placeholder="Ej. 154320" required />
@@ -55,9 +60,10 @@
               <p id="odometer-error" class="error" role="alert"></p>
             </div>
             <div>
-              <label for="liters">Litros cargados</label>
-              <input id="liters" name="liters" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Ej. 280.50" required />
-              <p id="liters-error" class="error" role="alert"></p>
+              <label for="gallons">Galones cargados</label>
+              <input id="gallons" name="gallons" type="number" min="0.01" max="300" step="0.01" inputmode="decimal" placeholder="Ej. 74.25" required />
+              <p class="field-help">Máximo inicial: 300 galones por carga.</p>
+              <p id="gallons-error" class="error" role="alert"></p>
             </div>
             <div>
               <label for="amount">Importe total (MXN, opcional)</label>
@@ -103,7 +109,7 @@
           <dl id="review-list" class="review-list">
             <div><dt>Unidad</dt><dd>—</dd></div>
             <div><dt>Odómetro</dt><dd>—</dd></div>
-            <div><dt>Litros</dt><dd>—</dd></div>
+            <div><dt>Galones</dt><dd>—</dd></div>
             <div><dt>Importe</dt><dd>—</dd></div>
             <div><dt>Precio por litro</dt><dd>—</dd></div>
             <div><dt>Evidencias</dt><dd>—</dd></div>
@@ -114,7 +120,7 @@
 
       <section id="registros" class="card records-card">
         <div class="records-heading"><div><p class="eyebrow">Historial local</p><h2>Últimos registros</h2></div><button id="export-csv" class="secondary-button" type="button">Exportar CSV</button></div>
-        <div class="table-wrap"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Unidad</th><th>Odómetro</th><th>Litros</th><th>Importe</th><th>Estado</th></tr></thead><tbody id="records-body"><tr class="empty"><td colspan="7">Aún no hay cargas registradas.</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Unidad / chofer</th><th>Odómetro</th><th>Galones</th><th>Importe</th><th>Estado</th></tr></thead><tbody id="records-body"><tr class="empty"><td colspan="7">Aún no hay cargas registradas.</td></tr></tbody></table></div>
       </section>
 
       <section id="unidades" class="card units-card">
