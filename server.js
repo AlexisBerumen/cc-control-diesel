@@ -108,7 +108,7 @@ async function getMotiveAccessToken() {
 }
 async function syncMotiveVehicles() {
   const accessToken = await getMotiveAccessToken();
-  let page = 1, total = Infinity, matched = 0, received = 0, responseShape = [], motiveEndpoint = 'v2';
+  let page = 1, total = Infinity, matched = 0, received = 0, vehiclesFound = 0, missingNumber = 0, missingOdometer = 0, responseShape = [], motiveEndpoint = 'v2';
   while ((page - 1) * 100 < total) {
     let response = await fetch(`https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'true', 'X-Time-Zone': 'America/Mexico_City' } });
     let data = await response.json();
@@ -126,11 +126,15 @@ async function syncMotiveVehicles() {
     }
     responseShape = Array.isArray(data) ? ['array'] : Object.keys(data);
     total = Number(data.total || data.pagination?.total || data.data?.total || vehicles.length);
+    vehiclesFound += vehicles.length;
     for (const vehicle of vehicles) {
-      const location = vehicle.current_location || vehicle;
-      const reading = location.true_odometer ?? location.odometer;
-      if (!vehicle.number || !Number.isFinite(Number(reading))) continue;
-      const updated = await pool.query('UPDATE units SET motive_vehicle_id = $1, motive_odometer = $2, motive_odometer_unit = $3, motive_odometer_updated_at = $4 WHERE LOWER(number) = LOWER($5)', [String(vehicle.id), Number(reading), 'km', location.located_at || new Date().toISOString(), vehicle.number]);
+      const vehicleDetails = vehicle.vehicle || vehicle;
+      const location = vehicle.current_location || vehicle.location || vehicleDetails.current_location || vehicleDetails.location || vehicle;
+      const number = vehicleDetails.number || vehicle.number || vehicleDetails.vehicle_number || vehicle.vehicle_number;
+      const reading = location.true_odometer ?? location.odometer ?? vehicleDetails.true_odometer ?? vehicleDetails.odometer;
+      if (!number) { missingNumber += 1; continue; }
+      if (!Number.isFinite(Number(reading))) { missingOdometer += 1; continue; }
+      const updated = await pool.query('UPDATE units SET motive_vehicle_id = $1, motive_odometer = $2, motive_odometer_unit = $3, motive_odometer_updated_at = $4 WHERE LOWER(number) = LOWER($5)', [String(vehicleDetails.id || vehicle.id), Number(reading), 'km', location.located_at || new Date().toISOString(), number]);
       if (updated.rowCount) matched += 1;
       received += 1;
     }
@@ -138,7 +142,7 @@ async function syncMotiveVehicles() {
     page += 1;
   }
   await pool.query('UPDATE motive_connection SET last_synced_at = NOW() WHERE id = TRUE');
-  return { vehiclesReceived: received, unitsMatched: matched, unitsWithoutMatch: Math.max(received - matched, 0), motiveEndpoint, motiveResponseFields: responseShape };
+  return { vehiclesReceived: vehiclesFound, vehiclesWithOdometer: received, unitsMatched: matched, unitsWithoutMatch: Math.max(received - matched, 0), missingNumber, missingOdometer, motiveEndpoint, motiveResponseFields: responseShape };
 }
 
 async function handleApi(request, response, url) {
