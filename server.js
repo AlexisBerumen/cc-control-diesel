@@ -8,7 +8,9 @@ const port = Number(process.env.PORT) || 3000;
 const publicDirectory = __dirname;
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }) : null;
 let databaseReady = false;
-const motiveScopes = ['companies.read', 'vehicles.read', 'locations.vehicle_locations_list'];
+// Motive's authorization screen accepts the specific scope enabled for the app.
+// This is the least-privilege scope needed to retrieve each vehicle's current odometer.
+const motiveScope = 'locations.vehicle_locations_list';
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 function sendJson(response, status, data) {
@@ -137,7 +139,7 @@ async function handleApi(request, response, url) {
     await pool.query('DELETE FROM motive_oauth_states WHERE expires_at < NOW()');
     await pool.query('INSERT INTO motive_oauth_states (state, expires_at) VALUES ($1, NOW() + INTERVAL \'10 minutes\')', [state]);
     const authorizationUrl = new URL('https://gomotive.com/oauth/authorize');
-    authorizationUrl.search = new URLSearchParams({ client_id: process.env.MOTIVE_CLIENT_ID, redirect_uri: process.env.MOTIVE_REDIRECT_URI, response_type: 'code', scope: motiveScopes.join(' '), state }).toString();
+    authorizationUrl.search = new URLSearchParams({ client_id: process.env.MOTIVE_CLIENT_ID, redirect_uri: process.env.MOTIVE_REDIRECT_URI, response_type: 'code', scope: motiveScope, state }).toString();
     response.writeHead(302, { Location: authorizationUrl.toString(), 'Cache-Control': 'no-store' }); response.end(); return true;
   }
   if (url.pathname === '/api/motive/callback' && request.method === 'GET') {
