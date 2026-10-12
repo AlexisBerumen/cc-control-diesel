@@ -8,6 +8,8 @@ const port = Number(process.env.PORT) || 3000;
 const publicDirectory = __dirname;
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }) : null;
 let databaseReady = false;
+const motiveSyncIntervalMinutes = Math.max(15, Number(process.env.MOTIVE_SYNC_INTERVAL_MINUTES || 60));
+let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
 // This is the least-privilege scope needed to retrieve each vehicle's current odometer.
 const motiveScope = 'locations.vehicle_locations_list';
@@ -110,6 +112,12 @@ async function getMotiveAccessToken() {
   return tokens.access_token;
 }
 async function syncMotiveVehicles() {
+  if (motiveSyncPromise) return motiveSyncPromise;
+  motiveSyncPromise = syncMotiveVehiclesInternal();
+  try { return await motiveSyncPromise; }
+  finally { motiveSyncPromise = null; }
+}
+async function syncMotiveVehiclesInternal() {
   const accessToken = await getMotiveAccessToken();
   let page = 1, total = Infinity, matched = 0, received = 0, vehiclesFound = 0, missingNumber = 0, missingOdometer = 0, responseShape = [], motiveEndpoint = 'v2';
   while ((page - 1) * 100 < total) {
@@ -234,8 +242,28 @@ const server = http.createServer(async (request, response) => {
     serveStatic(request, response, url);
   } catch (error) { console.error(error); if (!response.headersSent) sendJson(response, 500, { error: 'Ocurrió un error inesperado.' }); }
 });
+function startMotiveSyncSchedule() {
+  if (!databaseReady || !motiveConfigured()) {
+    console.log('Sincronización automática de Motive desactivada: falta base de datos o configuración.');
+    return;
+  }
+  const run = async () => {
+    try {
+      const result = await syncMotiveVehicles();
+      console.log(`Sincronización automática de Motive completada: ${result.unitsMatched} unidades actualizadas.`);
+    } catch (error) {
+      console.error('Falló la sincronización automática de Motive:', error.message);
+    }
+  };
+  console.log(`Sincronización automática de Motive programada cada ${motiveSyncIntervalMinutes} minutos.`);
+  setTimeout(run, 30_000);
+  setInterval(run, motiveSyncIntervalMinutes * 60_000);
+}
 async function start() {
   try { await initializeDatabase(); } catch (error) { console.error('No fue posible preparar PostgreSQL:', error.message); }
-  server.listen(port, '0.0.0.0', () => console.log(`C&C Control de Diésel disponible en el puerto ${port}`));
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`C&C Control de Diésel disponible en el puerto ${port}`);
+    startMotiveSyncSchedule();
+  });
 }
 start();
