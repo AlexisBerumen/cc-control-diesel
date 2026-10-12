@@ -84,8 +84,12 @@ function decryptSecret(value) {
   return Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64url')), decipher.final()]).toString('utf8');
 }
 async function requestMotiveToken(params) {
-  const response = await fetch('https://gomotive.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ...params, client_id: process.env.MOTIVE_CLIENT_ID, client_secret: process.env.MOTIVE_CLIENT_SECRET, redirect_uri: process.env.MOTIVE_REDIRECT_URI }) });
-  const data = await response.json();
+  // Motive's public OAuth documentation keeps the token endpoint on its
+  // original KeepTruckin domain. The gomotive.com host serves HTML here.
+  const response = await fetch('https://keeptruckin.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ...params, client_id: process.env.MOTIVE_CLIENT_ID, client_secret: process.env.MOTIVE_CLIENT_SECRET, redirect_uri: process.env.MOTIVE_REDIRECT_URI }) });
+  const responseText = await response.text();
+  let data;
+  try { data = JSON.parse(responseText); } catch { throw new Error(`Motive devolvió una respuesta inválida al generar el token (HTTP ${response.status}).`); }
   if (!response.ok || !data.access_token) throw new Error(data.error_description || data.error || 'Motive rechazó la autorización.');
   return data;
 }
