@@ -177,24 +177,28 @@ async function syncMotiveVehiclesInternal() {
 }
 
 async function syncMotiveDrivers(accessToken) {
-  let page = 1, total = Infinity, received = 0, synced = 0;
+  let page = 1, total = Infinity, received = 0, synced = 0, skippedByRole = 0, missingName = 0, missingId = 0;
   const motiveDriverIds = [];
+  const responseFields = new Set(), rolesFound = new Set();
   while ((page - 1) * 100 < total) {
     const response = await fetch(`https://api.gomotive.com/v1/users?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Time-Zone': 'America/Mexico_City' } });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || data.message || 'Motive no permitio consultar los choferes. Verifica el permiso Drivers and Fleet Managers.');
     const users = Array.isArray(data) ? data : data.users || data.data?.users || data.data || [];
     if (!Array.isArray(users)) throw new Error('Motive no devolvio una lista de usuarios.');
+    users.slice(0, 3).forEach((user) => Object.keys(user || {}).forEach((key) => responseFields.add(key)));
     total = Number(data.total || data.pagination?.total || data.data?.total || users.length);
     received += users.length;
     for (const user of users) {
       const roleCandidates = [user.role, user.user_role, user.userRole, ...(Array.isArray(user.roles) ? user.roles : [])];
       const roles = roleCandidates.flatMap((role) => typeof role === 'object' && role ? [role.name, role.key, role.type, role.role] : [role]).filter(Boolean).map((role) => String(role).toLowerCase());
-      if (roles.length && !roles.some((role) => role.includes('driver'))) continue;
+      roles.forEach((role) => rolesFound.add(role));
+      if (roles.length && !roles.some((role) => role.includes('driver'))) { skippedByRole += 1; continue; }
       const person = user.driver && typeof user.driver === 'object' ? user.driver : user;
       const name = [person.first_name || person.firstName || user.first_name || user.firstName, person.last_name || person.lastName || user.last_name || user.lastName].filter(Boolean).join(' ').trim() || person.name || person.full_name || person.fullName || user.name || user.full_name || user.fullName || user.username || user.email || user.email_address || user.emailAddress;
       const sourceId = user.id || user.user_id || user.userId || person.id;
-      if (!sourceId || !name) continue;
+      if (!sourceId) { missingId += 1; continue; }
+      if (!name) { missingName += 1; continue; }
       const motiveId = String(sourceId);
       motiveDriverIds.push(motiveId);
       const status = typeof user.status === 'object' && user.status ? user.status.name || user.status.value : user.status;
@@ -210,7 +214,7 @@ async function syncMotiveDrivers(accessToken) {
     page += 1;
   }
   if (motiveDriverIds.length) await pool.query('UPDATE drivers SET active = FALSE WHERE motive_driver_id <> ALL($1::text[])', [motiveDriverIds]);
-  return { driversReceived: received, driversSynced: synced };
+  return { driversReceived: received, driversSynced: synced, driversSkippedByRole: skippedByRole, driversMissingName: missingName, driversMissingId: missingId, driverResponseFields: [...responseFields].sort(), driverRolesFound: [...rolesFound].sort() };
 }
 
 async function handleApi(request, response, url) {
