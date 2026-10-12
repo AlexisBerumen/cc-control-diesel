@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="es-MX">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>C&C Transport | Control de diésel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#registro" aria-label="C&C Transport">
+        <span class="brand-mark">C&amp;C</span>
+        <span>Transport<br /><small>Control de diésel</small></span>
+      </a>
+      <nav aria-label="Navegación principal">
+        <a class="active" href="#registro">Registrar carga</a>
+        <a href="#registros">Registros</a>
+        <a href="#unidades">Unidades</a>
+      </nav>
+    </header>
+
+    <main>
+      <section id="registro" class="page-heading">
+        <div>
+          <p class="eyebrow">Nueva evidencia</p>
+          <h1>Registrar carga de diésel</h1>
+          <p class="intro">Completa todos los campos y verifica el resumen antes de enviarlo.</p>
+        </div>
+        <div class="secure-note"><span>✓</span> Registro con fecha y hora automática</div>
+      </section>
+
+      <section class="layout">
+        <form id="fuel-form" class="card form-card" novalidate>
+          <div class="section-title"><span class="step">1</span><div><h2>Unidad</h2><p>Selecciona una unidad registrada.</p></div></div>
+          <label for="unit-search">Número de unidad</label>
+          <div class="autocomplete">
+            <input id="unit-search" name="unitSearch" type="text" autocomplete="off" placeholder="Ej. 024" aria-describedby="unit-help" />
+            <div id="unit-options" class="suggestions" role="listbox" hidden></div>
+          </div>
+          <p id="unit-help" class="field-help">Escribe el número tal como está asignado. No se aceptan unidades no registradas.</p>
+          <div id="selected-unit" class="unit-confirmation" hidden></div>
+          <p id="unit-error" class="error" role="alert"></p>
+
+          <div class="divider"></div>
+          <div class="section-title"><span class="step">2</span><div><h2>Datos de la carga</h2><p>Usa los valores que aparecen en el ticket o bomba.</p></div></div>
+          <div class="field-grid">
+            <div>
+              <label for="odometer">Odómetro (km)</label>
+              <input id="odometer" name="odometer" type="number" min="1" step="1" inputmode="numeric" placeholder="Ej. 154320" required />
+              <p id="odometer-note" class="field-help">Selecciona una unidad para validar el kilometraje.</p>
+              <p id="odometer-error" class="error" role="alert"></p>
+            </div>
+            <div>
+              <label for="liters">Litros cargados</label>
+              <input id="liters" name="liters" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Ej. 280.50" required />
+              <p id="liters-error" class="error" role="alert"></p>
+            </div>
+            <div>
+              <label for="amount">Importe total (MXN)</label>
+              <input id="amount" name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Ej. 6020.75" required />
+              <p id="amount-error" class="error" role="alert"></p>
+            </div>
+            <div>
+              <label for="station">Estación de servicio</label>
+              <input id="station" name="station" type="text" maxlength="80" placeholder="Ej. Gasolinera El Norte" required />
+              <p id="station-error" class="error" role="alert"></p>
+            </div>
+          </div>
+          <output id="price-output" class="price-output" hidden></output>
+
+          <div class="divider"></div>
+          <div class="section-title"><span class="step">3</span><div><h2>Evidencias</h2><p>Ambas fotos son obligatorias y deben ser legibles.</p></div></div>
+          <div class="upload-grid">
+            <label class="upload-box" id="ticket-box" for="ticket-photo">
+              <input id="ticket-photo" name="ticketPhoto" type="file" accept="image/*" capture="environment" required />
+              <span class="upload-icon">▣</span>
+              <strong>Foto del ticket o bomba</strong>
+              <small>JPG, PNG o HEIC</small>
+              <span class="file-name">Tomar o seleccionar foto</span>
+            </label>
+            <label class="upload-box" id="odometer-box" for="odometer-photo">
+              <input id="odometer-photo" name="odometerPhoto" type="file" accept="image/*" capture="environment" required />
+              <span class="upload-icon">◉</span>
+              <strong>Foto del odómetro</strong>
+              <small>El número debe verse completo</small>
+              <span class="file-name">Tomar o seleccionar foto</span>
+            </label>
+          </div>
+          <p id="evidence-error" class="error" role="alert"></p>
+
+          <button class="primary-button" type="submit">Revisar y enviar carga <span>→</span></button>
+        </form>
+
+        <aside class="card review-card">
+          <p class="eyebrow">Revisión previa</p>
+          <h2>Resumen de la carga</h2>
+          <p class="muted">Los datos se muestran aquí para detectar errores antes de enviar.</p>
+          <dl id="review-list" class="review-list">
+            <div><dt>Unidad</dt><dd>—</dd></div>
+            <div><dt>Odómetro</dt><dd>—</dd></div>
+            <div><dt>Litros</dt><dd>—</dd></div>
+            <div><dt>Importe</dt><dd>—</dd></div>
+            <div><dt>Precio por litro</dt><dd>—</dd></div>
+            <div><dt>Evidencias</dt><dd>—</dd></div>
+          </dl>
+          <div class="review-tip"><span>i</span><p>Antes de enviar, compara el importe, litros y kilometraje con las evidencias.</p></div>
+        </aside>
+      </section>
+
+      <section id="registros" class="card records-card">
+        <div class="records-heading"><div><p class="eyebrow">Historial local</p><h2>Últimos registros</h2></div><button id="export-csv" class="secondary-button" type="button">Exportar CSV</button></div>
+        <div class="table-wrap"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Unidad</th><th>Odómetro</th><th>Litros</th><th>Importe</th><th>Estado</th></tr></thead><tbody id="records-body"><tr class="empty"><td colspan="7">Aún no hay cargas registradas.</td></tr></tbody></table></div>
+      </section>
+
+      <section id="unidades" class="card units-card">
+        <div><p class="eyebrow">Catálogo</p><h2>Unidades registradas</h2><p class="muted">Este listado controla las unidades que los choferes pueden seleccionar.</p></div>
+        <form id="unit-form" class="add-unit-form">
+          <input id="new-unit-number" maxlength="12" placeholder="Núm. unidad" aria-label="Número de unidad" required />
+          <input id="new-unit-plates" maxlength="15" placeholder="Placas" aria-label="Placas" required />
+          <input id="new-unit-description" maxlength="60" placeholder="Marca / modelo" aria-label="Marca y modelo" required />
+          <button class="secondary-button" type="submit">Agregar unidad</button>
+        </form>
+        <div id="unit-catalog" class="unit-catalog"></div>
+      </section>
+    </main>
+    <dialog id="confirm-dialog" class="confirmation-dialog">
+      <form method="dialog"><button class="close-dialog" value="cancel" aria-label="Cerrar">×</button></form>
+      <p class="eyebrow">Confirma la información</p><h2>¿Todo coincide con tus evidencias?</h2>
+      <div id="dialog-summary" class="dialog-summary"></div>
+      <div class="dialog-actions"><button id="edit-button" class="secondary-button" value="cancel">Corregir</button><button id="confirm-button" class="primary-button" value="confirm">Confirmar y guardar</button></div>
+    </dialog>
+    <div id="toast" class="toast" role="status"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
