@@ -18,8 +18,10 @@
       </a>
       <nav aria-label="Navegación principal">
         <a class="active" href="#registro">Registrar carga</a>
-        <a href="#registros">Registros</a>
+        <a id="records-link" href="#registros">Registros</a>
         <a href="#unidades">Unidades</a>
+        <button id="login-button" class="nav-button" type="button">Acceso admin</button>
+        <button id="logout-button" class="nav-button" type="button" hidden>Salir</button>
       </nav>
     </header>
 
@@ -123,14 +125,14 @@
         </aside>
       </section>
 
-      <section id="registros" class="card records-card">
+      <section id="registros" class="card records-card" hidden>
         <div class="records-heading"><div><p class="eyebrow">Historial local</p><h2>Últimos registros</h2></div><button id="export-csv" class="secondary-button" type="button">Exportar CSV</button></div>
         <div class="table-wrap"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Unidad / chofer</th><th>Odómetro</th><th>Galones</th><th>Importe</th><th>Evidencias</th><th>Estado</th></tr></thead><tbody id="records-body"><tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr></tbody></table></div>
       </section>
 
       <section id="unidades" class="card units-card">
         <div><p class="eyebrow">Catálogo</p><h2>Unidades registradas</h2><p class="muted">Este listado controla las unidades que los choferes pueden seleccionar.</p></div>
-        <form id="unit-form" class="add-unit-form">
+        <form id="unit-form" class="add-unit-form" hidden>
           <input id="new-unit-number" maxlength="12" placeholder="Núm. unidad" aria-label="Número de unidad" required />
           <input id="new-unit-plates" maxlength="24" placeholder="Serie o placas" aria-label="Número de serie o placas" required />
           <input id="new-unit-description" maxlength="60" placeholder="Marca / modelo" aria-label="Marca y modelo" required />
@@ -144,6 +146,18 @@
       <p class="eyebrow">Confirma la información</p><h2>¿Todo coincide con tus evidencias?</h2>
       <div id="dialog-summary" class="dialog-summary"></div>
       <div class="dialog-actions"><button id="edit-button" class="secondary-button" value="cancel">Corregir</button><button id="confirm-button" class="primary-button" value="confirm">Confirmar y guardar</button></div>
+    </dialog>
+    <dialog id="login-dialog" class="confirmation-dialog login-dialog">
+      <form method="dialog"><button class="close-dialog" value="cancel" aria-label="Cerrar">×</button></form>
+      <p class="eyebrow">Acceso administrativo</p>
+      <h2>Ver registros</h2>
+      <p class="muted">Inicia sesión para consultar y exportar las cargas registradas.</p>
+      <form id="login-form" class="login-form">
+        <div><label for="login-email">Correo</label><input id="login-email" type="email" autocomplete="username" required /></div>
+        <div><label for="login-password">Contraseña</label><input id="login-password" type="password" autocomplete="current-password" required /></div>
+        <p id="login-error" class="error" role="alert"></p>
+        <button id="login-submit" class="primary-button" type="submit">Iniciar sesión</button>
+      </form>
     </dialog>
     <div id="toast" class="toast" role="status"></div>
     <script src="units.js"></script>

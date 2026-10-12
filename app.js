@@ -10,11 +10,13 @@ const defaultUnits = window.CC_UNIT_DATA.map(([number, serial, description]) => 
 }));
 const $ = (selector) => document.querySelector(selector);
 let units = load(STORAGE.units, defaultUnits);
-let records = load(STORAGE.records, []);
+let records = [];
+try { localStorage.removeItem(STORAGE.records); } catch { /* Los registros sólo se consultan con sesión. */ }
 let drivers = load(STORAGE.drivers, []);
 let selectedUnit = null;
 let selectedDriver = null;
 let toastTimer;
+let isAdmin = false;
 
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
@@ -174,7 +176,8 @@ $('#confirm-button').addEventListener('click', async e => {
     return;
   }
   confirmButton.disabled = false;
-  records.push(saved); save(STORAGE.records, records); $('#confirm-dialog').close(); renderRecords(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada correctamente.`); location.hash = '#registros';
+  if (isAdmin) { records.push(saved); renderRecords(); }
+  $('#confirm-dialog').close(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada correctamente.`); location.hash = '#registro';
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
 $('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
@@ -195,16 +198,75 @@ $('#unit-form').addEventListener('submit', async (event) => {
   } catch (error) { showToast(error.message || 'No se pudo conectar a la base de datos.'); }
 }, { capture: true });
 
+function setAdminInterface(authenticated) {
+  isAdmin = authenticated;
+  $('#registros').hidden = !authenticated;
+  $('#unit-form').hidden = !authenticated;
+  $('#login-button').hidden = authenticated;
+  $('#logout-button').hidden = !authenticated;
+}
+async function updateSession() {
+  try {
+    const response = await fetch('/api/auth/status');
+    const data = await response.json();
+    setAdminInterface(Boolean(data.authenticated));
+  } catch { setAdminInterface(false); }
+  return isAdmin;
+}
 async function synchronizeWithDatabase() {
   try {
-    const [unitsResponse, recordsResponse, driversResponse] = await Promise.all([fetch('/api/units'), fetch('/api/records'), fetch('/api/drivers')]);
-    if (!unitsResponse.ok || !recordsResponse.ok || !driversResponse.ok) return;
-    units = await unitsResponse.json();
-    records = await recordsResponse.json();
-    drivers = await driversResponse.json();
-    save(STORAGE.units, units); save(STORAGE.records, records); save(STORAGE.drivers, drivers);
+    const admin = await updateSession();
+    const [unitsResponse, driversResponse] = await Promise.all([fetch('/api/units'), fetch('/api/drivers')]);
+    if (unitsResponse.ok) { units = await unitsResponse.json(); save(STORAGE.units, units); }
+    if (driversResponse.ok) { drivers = await driversResponse.json(); save(STORAGE.drivers, drivers); }
+    if (admin) {
+      const recordsResponse = await fetch('/api/records');
+      if (recordsResponse.ok) { records = await recordsResponse.json(); }
+    } else {
+      records = [];
+      localStorage.removeItem(STORAGE.records);
+    }
     renderUnitCatalog(); renderRecords(); updateReview();
   } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
 }
 
-renderUnitCatalog(); renderRecords(); updateReview(); synchronizeWithDatabase();
+$('#records-link').addEventListener('click', (event) => {
+  if (isAdmin) return;
+  event.preventDefault();
+  $('#login-error').textContent = '';
+  $('#login-dialog').showModal();
+  $('#login-email').focus();
+});
+$('#login-button').addEventListener('click', () => {
+  $('#login-error').textContent = '';
+  $('#login-dialog').showModal();
+  $('#login-email').focus();
+});
+$('#login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = $('#login-submit');
+  button.disabled = true;
+  $('#login-error').textContent = '';
+  try {
+    const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: $('#login-email').value, password: $('#login-password').value }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible iniciar sesión.');
+    $('#login-dialog').close();
+    $('#login-form').reset();
+    await synchronizeWithDatabase();
+    location.hash = '#registros';
+    showToast('Sesión iniciada.');
+  } catch (error) { $('#login-error').textContent = error.message || 'No fue posible iniciar sesión.'; }
+  button.disabled = false;
+});
+$('#logout-button').addEventListener('click', async () => {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* La interfaz se cierra aun si hubo un problema de red. */ }
+  records = [];
+  localStorage.removeItem(STORAGE.records);
+  setAdminInterface(false);
+  renderRecords();
+  location.hash = '#registro';
+  showToast('Sesión cerrada.');
+});
+
+setAdminInterface(false); renderUnitCatalog(); renderRecords(); updateReview(); synchronizeWithDatabase();
