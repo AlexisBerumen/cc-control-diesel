@@ -21,7 +21,9 @@ function number(value) { return new Intl.NumberFormat('es-MX', { maximumFraction
 function esc(text) { const d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
 
 function lastOdometer(unitId) {
-  return records.filter(r => r.unitId === unitId).sort((a, b) => b.odometer - a.odometer)[0]?.odometer;
+  const recordOdometer = records.filter(r => r.unitId === unitId).sort((a, b) => b.odometer - a.odometer)[0]?.odometer || 0;
+  const motiveOdometer = Number(units.find(unit => unit.id === unitId)?.motiveOdometer || 0);
+  return Math.max(recordOdometer, motiveOdometer) || undefined;
 }
 function renderUnitCatalog() {
   $('#unit-catalog').innerHTML = units.length ? units.map(u => `<div class="catalog-unit"><strong>Unidad ${esc(u.number)}</strong><small>${esc(u.plates)} · ${esc(u.description)}</small></div>`).join('') : '<p class="muted">No hay unidades registradas.</p>';
@@ -39,7 +41,7 @@ function setUnit(unit) {
   const last = lastOdometer(unit.id);
   $('#selected-unit').hidden = false;
   $('#selected-unit').innerHTML = `<span>✓</span><div><strong>Unidad ${esc(unit.number)} seleccionada</strong><br><small>${esc(unit.plates)} · ${esc(unit.description)}</small></div>`;
-  $('#odometer-note').textContent = last ? `Último odómetro registrado: ${number(last)} km.` : 'Aún no hay kilometraje previo para esta unidad.';
+  $('#odometer-note').textContent = last ? `Odómetro de referencia (Motive o carga previa): ${number(last)} km.` : 'Aún no hay kilometraje previo para esta unidad.';
   updateReview();
 }
 function updateSuggestions() {
