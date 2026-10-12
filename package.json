@@ -1,0 +1,12 @@
+{
+  "name": "cc-control-diesel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MVP de control de cargas de diésel para C&C Transport",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
