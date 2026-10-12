@@ -21,6 +21,13 @@ function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function money(value) { return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(value || 0)); }
 function number(value) { return new Intl.NumberFormat('es-MX', { maximumFractionDigits: 2 }).format(Number(value || 0)); }
 function esc(text) { const d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
+function fileAsDataUrl(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('No fue posible leer la foto.')); reader.readAsDataURL(file); }); }
+async function uploadEvidence(file, kind) {
+  const response = await fetch('/api/evidence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, imageData: await fileAsDataUrl(file) }) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No fue posible subir una evidencia.');
+  return data;
+}
 
 function lastOdometer(unitId) {
   const recordOdometer = records.filter(r => r.unitId === unitId).sort((a, b) => b.odometer - a.odometer)[0]?.odometer || 0;
@@ -32,8 +39,8 @@ function renderUnitCatalog() {
 }
 function renderRecords() {
   const body = $('#records-body');
-  if (!records.length) { body.innerHTML = '<tr class="empty"><td colspan="7">Aún no hay cargas registradas.</td></tr>'; return; }
-  body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(r.plates)}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td><span class="status">Completo</span></td></tr>`).join('');
+  if (!records.length) { body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr>'; return; }
+  body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(r.plates)}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
 }
 function setUnit(unit) {
   selectedUnit = unit;
@@ -92,7 +99,10 @@ function validate(show = true) {
   const amountValue = $('#amount').value.trim(), amount = Number(amountValue);
   if (amountValue && (!amount || amount <= 0)) { if (show) setError('#amount-error', 'El importe debe ser mayor a cero o déjalo vacío para bomba C&C.'); valid = false; } else setError('#amount-error', '');
   if (!$('#station').value.trim()) { if (show) setError('#station-error', 'Indica la estación de servicio.'); valid = false; } else setError('#station-error', '');
-  if (!$('#ticket-photo').files.length || !$('#odometer-photo').files.length) { if (show) setError('#evidence-error', 'Debes adjuntar las dos evidencias.'); valid = false; } else setError('#evidence-error', '');
+  const evidenceFiles = [$('#ticket-photo').files[0], $('#odometer-photo').files[0]];
+  if (evidenceFiles.some(file => !file)) { if (show) setError('#evidence-error', 'Debes adjuntar las dos evidencias.'); valid = false; }
+  else if (evidenceFiles.some(file => file.size > 8 * 1024 * 1024)) { if (show) setError('#evidence-error', 'Cada foto debe pesar máximo 8 MB.'); valid = false; }
+  else setError('#evidence-error', '');
   return valid;
 }
 function updateReview() {
@@ -144,21 +154,30 @@ $('#confirm-button').addEventListener('click', async e => {
   e.preventDefault();
   const now = new Date();
   const amountValue = $('#amount').value.trim();
-  const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, driverId: selectedDriver.id, driverName: selectedDriver.name, odometer: Number($('#odometer').value), gallons: Number($('#gallons').value), amount: amountValue ? Number(amountValue) : null, station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name };
+  const confirmButton = $('#confirm-button');
+  confirmButton.disabled = true;
   let saved;
   try {
+    showToast('Subiendo evidencias de forma segura...');
+    const [ticketEvidence, odometerEvidence] = await Promise.all([
+      uploadEvidence($('#ticket-photo').files[0], 'ticket'),
+      uploadEvidence($('#odometer-photo').files[0], 'odometer')
+    ]);
+    const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, driverId: selectedDriver.id, driverName: selectedDriver.name, odometer: Number($('#odometer').value), gallons: Number($('#gallons').value), amount: amountValue ? Number(amountValue) : null, station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name, ticketUrl: ticketEvidence.url, odometerUrl: odometerEvidence.url };
     const response = await fetch('/api/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No fue posible guardar la carga.');
     saved = data;
   } catch (error) {
     showToast(error.message || 'No se pudo conectar a la base de datos.');
+    confirmButton.disabled = false;
     return;
   }
+  confirmButton.disabled = false;
   records.push(saved); save(STORAGE.records, records); $('#confirm-dialog').close(); renderRecords(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada correctamente.`); location.hash = '#registros';
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
-$('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Ticket','Foto odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile]); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
+$('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
 
 $('#unit-form').addEventListener('submit', async (event) => {
   event.preventDefault();

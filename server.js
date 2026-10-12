@@ -61,6 +61,8 @@ async function initializeDatabase() {
     END $$;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS driver_name TEXT;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS driver_id TEXT REFERENCES drivers(id);
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS ticket_url TEXT;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_url TEXT;
     UPDATE fuel_records SET driver_name = 'No registrado' WHERE driver_name IS NULL;
     ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
@@ -77,11 +79,11 @@ async function initializeDatabase() {
   databaseReady = true;
   console.log('PostgreSQL conectado y catálogo de unidades preparado.');
 }
-function readJson(request) {
+function readJson(request, maxBytes = 100_000) {
   return new Promise((resolve, reject) => {
-    let body = '';
-    request.on('data', (chunk) => { body += chunk; if (body.length > 100_000) reject(new Error('La solicitud es demasiado grande.')); });
-    request.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('JSON inválido.')); } });
+    let body = '', tooLarge = false;
+    request.on('data', (chunk) => { if (tooLarge) return; body += chunk; if (Buffer.byteLength(body) > maxBytes) { tooLarge = true; reject(new Error('La solicitud es demasiado grande.')); } });
+    request.on('end', () => { if (tooLarge) return; try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('JSON inválido.')); } });
     request.on('error', reject);
   });
 }
@@ -89,6 +91,20 @@ function cleanText(value, maxLength) { return typeof value === 'string' ? value.
 function databaseUnavailable(response) { sendJson(response, 503, { error: 'La base de datos aún no está disponible.' }); }
 function sendHtml(response, status, html) { response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); response.end(html); }
 function motiveConfigured() { return Boolean(process.env.MOTIVE_CLIENT_ID && process.env.MOTIVE_CLIENT_SECRET && process.env.MOTIVE_REDIRECT_URI && process.env.MOTIVE_TOKEN_ENCRYPTION_KEY); }
+function cloudinaryConfigured() { return Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET); }
+function isCloudinaryEvidenceUrl(value) { return typeof value === 'string' && value.startsWith(`https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`); }
+async function uploadEvidenceToCloudinary(dataUrl, kind) {
+  if (!cloudinaryConfigured()) throw new Error('Falta configurar Cloudinary en Railway.');
+  if (!['ticket', 'odometer'].includes(kind) || typeof dataUrl !== 'string' || !/^data:image\/(jpeg|jpg|png|heic|webp);base64,/i.test(dataUrl)) throw new Error('La evidencia debe ser una imagen válida.');
+  const encoded = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  if (Buffer.byteLength(encoded, 'base64') > 8 * 1024 * 1024) throw new Error('Cada foto debe pesar máximo 8 MB.');
+  const form = new URLSearchParams({ file: dataUrl, folder: 'cc-control-diesel/evidencias', public_id: `${kind}-${crypto.randomUUID()}`, tags: 'cc-control-diesel,evidencia' });
+  const credentials = Buffer.from(`${process.env.CLOUDINARY_API_KEY}:${process.env.CLOUDINARY_API_SECRET}`).toString('base64');
+  const result = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(process.env.CLOUDINARY_CLOUD_NAME)}/image/upload`, { method: 'POST', headers: { Authorization: `Basic ${credentials}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+  const data = await result.json();
+  if (!result.ok || !data.secure_url) throw new Error(data.error?.message || 'No fue posible subir la evidencia.');
+  return { url: data.secure_url, publicId: data.public_id };
+}
 function motiveEncryptionKey() {
   const key = Buffer.from(process.env.MOTIVE_TOKEN_ENCRYPTION_KEY || '', 'base64');
   if (key.length !== 32) throw new Error('MOTIVE_TOKEN_ENCRYPTION_KEY debe ser una clave Base64 de 32 bytes.');
@@ -265,15 +281,19 @@ async function handleApi(request, response, url) {
     const result = await pool.query('SELECT id, name FROM drivers WHERE active = TRUE ORDER BY name');
     sendJson(response, 200, result.rows); return true;
   }
+  if (url.pathname === '/api/evidence' && request.method === 'POST') {
+    const body = await readJson(request, 12_000_000);
+    sendJson(response, 201, await uploadEvidenceToCloudinary(body.imageData, body.kind)); return true;
+  }
   if (url.pathname === '/api/records' && request.method === 'GET') {
-    const result = await pool.query('SELECT id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile" FROM fuel_records ORDER BY created_at ASC');
+    const result = await pool.query('SELECT id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl" FROM fuel_records ORDER BY created_at ASC');
     sendJson(response, 200, result.rows); return true;
   }
   if (url.pathname === '/api/records' && request.method === 'POST') {
     const body = await readJson(request);
     const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), gallons = Number(body.gallons), amount = body.amount === null || body.amount === '' || body.amount === undefined ? null : Number(body.amount);
-    const driverId = cleanText(body.driverId, 100), station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180);
-    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !driverId || !station || !ticketFile || !odometerFile) { sendJson(response, 400, { error: `Datos de carga incompletos o no válidos. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
+    const driverId = cleanText(body.driverId, 100), station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180), ticketUrl = cleanText(body.ticketUrl, 1_000), odometerUrl = cleanText(body.odometerUrl, 1_000);
+    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !driverId || !station || !ticketFile || !odometerFile || !isCloudinaryEvidenceUrl(ticketUrl) || !isCloudinaryEvidenceUrl(odometerUrl)) { sendJson(response, 400, { error: `Datos de carga incompletos o no válidos. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
     const unitResult = await pool.query('SELECT id, number, identifier FROM units WHERE id = $1', [body.unitId]);
     if (!unitResult.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada no existe.' }); return true; }
     const driverResult = await pool.query('SELECT id, name FROM drivers WHERE id = $1 AND active = TRUE', [driverId]);
@@ -281,9 +301,9 @@ async function handleApi(request, response, url) {
     const unit = unitResult.rows[0], driver = driverResult.rows[0], client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, ticketFile, odometerFile]);
+      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file, ticket_url, odometer_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, ticketFile, odometerFile, ticketUrl, odometerUrl]);
       const row = inserted.rows[0], folio = `DC-${new Date(row.created_at).getFullYear()}-${String(row.record_id).padStart(5, '0')}`;
-      const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile"', [folio, row.record_id]);
+      const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl"', [folio, row.record_id]);
       await client.query('COMMIT'); sendJson(response, 201, saved.rows[0]);
     } catch (error) { await client.query('ROLLBACK'); if (error.code === '23505') sendJson(response, 409, { error: 'Esta carga ya fue registrada.' }); else throw error; }
     finally { client.release(); }
