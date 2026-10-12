@@ -186,10 +186,11 @@ async function syncMotiveDrivers(accessToken) {
     if (!response.ok) throw new Error(data.error || data.message || 'Motive no permitio consultar los choferes. Verifica el permiso Drivers and Fleet Managers.');
     const users = Array.isArray(data) ? data : data.users || data.data?.users || data.data || [];
     if (!Array.isArray(users)) throw new Error('Motive no devolvio una lista de usuarios.');
-    users.slice(0, 3).forEach((user) => Object.keys(user || {}).forEach((key) => responseFields.add(key)));
+    users.slice(0, 3).forEach((entry) => Object.keys((entry && entry.user) || entry || {}).forEach((key) => responseFields.add(key)));
     total = Number(data.total || data.pagination?.total || data.data?.total || users.length);
     received += users.length;
-    for (const user of users) {
+    for (const entry of users) {
+      const user = entry && entry.user && typeof entry.user === 'object' ? entry.user : entry;
       const roleCandidates = [user.role, user.user_role, user.userRole, ...(Array.isArray(user.roles) ? user.roles : [])];
       const roles = roleCandidates.flatMap((role) => typeof role === 'object' && role ? [role.name, role.key, role.type, role.role] : [role]).filter(Boolean).map((role) => String(role).toLowerCase());
       roles.forEach((role) => rolesFound.add(role));
