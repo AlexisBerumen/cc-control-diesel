@@ -1,6 +1,9 @@
 const STORAGE = { units: 'cc-units-v2', records: 'cc-fuel-records-v2' };
+function createUnitId(number) {
+  return `unit-${number.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+}
 const defaultUnits = window.CC_UNIT_DATA.map(([number, serial, description]) => ({
-  id: crypto.randomUUID(),
+  id: createUnitId(number),
   number,
   plates: serial ? `S/N: ${serial}` : 'Sin identificador',
   description
@@ -102,13 +105,50 @@ $('#fuel-form').addEventListener('submit', e => {
   const values = [['Unidad', `${selectedUnit.number} · ${selectedUnit.plates}`], ['Odómetro', `${number($('#odometer').value)} km`], ['Litros', `${number($('#liters').value)} L`], ['Importe', money($('#amount').value)], ['Estación', $('#station').value.trim()]];
   $('#dialog-summary').innerHTML = values.map(([k,v]) => `<p><span>${k}</span><strong>${esc(v)}</strong></p>`).join(''); $('#confirm-dialog').showModal();
 });
-$('#confirm-button').addEventListener('click', e => {
+$('#confirm-button').addEventListener('click', async e => {
   e.preventDefault();
   const now = new Date();
   const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, odometer: Number($('#odometer').value), liters: Number($('#liters').value), amount: Number($('#amount').value), station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name };
-  records.push(record); save(STORAGE.records, records); $('#confirm-dialog').close(); renderRecords(); resetFuelForm(); showToast(`Carga ${record.folio} guardada correctamente.`); location.hash = '#registros';
+  let saved;
+  try {
+    const response = await fetch('/api/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible guardar la carga.');
+    saved = data;
+  } catch (error) {
+    showToast(error.message || 'No se pudo conectar a la base de datos.');
+    return;
+  }
+  records.push(saved); save(STORAGE.records, records); $('#confirm-dialog').close(); renderRecords(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada correctamente.`); location.hash = '#registros';
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
 $('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Identificador','Odómetro (km)','Litros','Importe (MXN)','Estación','Ticket','Foto odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.plates,r.odometer,r.liters,r.amount,r.station,r.ticketFile,r.odometerFile]); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
 
-renderUnitCatalog(); renderRecords(); updateReview();
+$('#unit-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const numberInput = $('#new-unit-number');
+  const number = numberInput.value.trim().toUpperCase();
+  const plates = $('#new-unit-plates').value.trim().toUpperCase();
+  const description = $('#new-unit-description').value.trim();
+  if (units.some((unit) => unit.number.toUpperCase() === number)) { showToast('Ese número de unidad ya está registrado.'); return; }
+  try {
+    const response = await fetch('/api/units', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number, plates, description }) });
+    const saved = await response.json();
+    if (!response.ok) throw new Error(saved.error || 'No fue posible agregar la unidad.');
+    units.push(saved); save(STORAGE.units, units); event.currentTarget.reset(); renderUnitCatalog(); showToast(`Unidad ${number} agregada al catálogo.`);
+  } catch (error) { showToast(error.message || 'No se pudo conectar a la base de datos.'); }
+}, { capture: true });
+
+async function synchronizeWithDatabase() {
+  try {
+    const [unitsResponse, recordsResponse] = await Promise.all([fetch('/api/units'), fetch('/api/records')]);
+    if (!unitsResponse.ok || !recordsResponse.ok) return;
+    units = await unitsResponse.json();
+    records = await recordsResponse.json();
+    save(STORAGE.units, units); save(STORAGE.records, records);
+    renderUnitCatalog(); renderRecords(); updateReview();
+  } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
+}
+
+renderUnitCatalog(); renderRecords(); updateReview(); synchronizeWithDatabase();
