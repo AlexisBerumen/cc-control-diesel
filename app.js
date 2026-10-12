@@ -104,7 +104,8 @@ $('#unit-search').addEventListener('input', () => {
 $('#unit-options').addEventListener('click', e => { const button = e.target.closest('[data-id]'); if (button) setUnit(units.find(u => u.id === button.dataset.id)); });
 document.addEventListener('click', e => { if (!e.target.closest('.autocomplete')) $('#unit-options').hidden = true; });
 ['driver-name','odometer','gallons','amount','station','ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('input', updateReview));
-['ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('change', e => { const box = $(`#${id}-box`); const name = e.target.files[0]?.name; box.classList.toggle('has-file', Boolean(name)); box.querySelector('.file-name').textContent = name || 'Tomar o seleccionar foto'; updateReview(); }));
+const evidenceBoxes = { 'ticket-photo': '#ticket-box', 'odometer-photo': '#odometer-box' };
+Object.entries(evidenceBoxes).forEach(([inputId, boxSelector]) => $(`#${inputId}`).addEventListener('change', e => { const box = $(boxSelector); const name = e.target.files[0]?.name; box.classList.toggle('has-file', Boolean(name)); box.querySelector('.file-name').textContent = name || 'Tomar o seleccionar foto'; updateReview(); }));
 
 $('#fuel-form').addEventListener('submit', e => {
   e.preventDefault(); if (!validate()) { showToast('Revisa los campos marcados antes de continuar.'); return; }
