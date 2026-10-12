@@ -1,9 +1,10 @@
-const STORAGE = { units: 'cc-units-v1', records: 'cc-fuel-records-v1' };
-const defaultUnits = [
-  { id: crypto.randomUUID(), number: '024', plates: 'AB-1234-A', description: 'Kenworth T680' },
-  { id: crypto.randomUUID(), number: '031', plates: 'CD-5678-B', description: 'Freightliner Cascadia' },
-  { id: crypto.randomUUID(), number: '042', plates: 'EF-9012-C', description: 'International LT' }
-];
+const STORAGE = { units: 'cc-units-v2', records: 'cc-fuel-records-v2' };
+const defaultUnits = window.CC_UNIT_DATA.map(([number, serial, description]) => ({
+  id: crypto.randomUUID(),
+  number,
+  plates: serial ? `S/N: ${serial}` : 'Sin identificador',
+  description
+}));
 const $ = (selector) => document.querySelector(selector);
 let units = load(STORAGE.units, defaultUnits);
 let records = load(STORAGE.records, []);
@@ -108,6 +109,6 @@ $('#confirm-button').addEventListener('click', e => {
   records.push(record); save(STORAGE.records, records); $('#confirm-dialog').close(); renderRecords(); resetFuelForm(); showToast(`Carga ${record.folio} guardada correctamente.`); location.hash = '#registros';
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
-$('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Placas','Odómetro (km)','Litros','Importe (MXN)','Estación','Ticket','Foto odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.plates,r.odometer,r.liters,r.amount,r.station,r.ticketFile,r.odometerFile]); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
+$('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Identificador','Odómetro (km)','Litros','Importe (MXN)','Estación','Ticket','Foto odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.plates,r.odometer,r.liters,r.amount,r.station,r.ticketFile,r.odometerFile]); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
 
 renderUnitCatalog(); renderRecords(); updateReview();

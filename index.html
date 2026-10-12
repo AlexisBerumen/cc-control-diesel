@@ -120,7 +120,7 @@
         <div><p class="eyebrow">Catálogo</p><h2>Unidades registradas</h2><p class="muted">Este listado controla las unidades que los choferes pueden seleccionar.</p></div>
         <form id="unit-form" class="add-unit-form">
           <input id="new-unit-number" maxlength="12" placeholder="Núm. unidad" aria-label="Número de unidad" required />
-          <input id="new-unit-plates" maxlength="15" placeholder="Placas" aria-label="Placas" required />
+          <input id="new-unit-plates" maxlength="24" placeholder="Serie o placas" aria-label="Número de serie o placas" required />
           <input id="new-unit-description" maxlength="60" placeholder="Marca / modelo" aria-label="Marca y modelo" required />
           <button class="secondary-button" type="submit">Agregar unidad</button>
         </form>
@@ -134,6 +134,7 @@
       <div class="dialog-actions"><button id="edit-button" class="secondary-button" value="cancel">Corregir</button><button id="confirm-button" class="primary-button" value="confirm">Confirmar y guardar</button></div>
     </dialog>
     <div id="toast" class="toast" role="status"></div>
+    <script src="units.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
