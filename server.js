@@ -108,14 +108,22 @@ async function getMotiveAccessToken() {
 }
 async function syncMotiveVehicles() {
   const accessToken = await getMotiveAccessToken();
-  let page = 1, total = Infinity, matched = 0, received = 0, responseShape = [];
+  let page = 1, total = Infinity, matched = 0, received = 0, responseShape = [], motiveEndpoint = 'v2';
   while ((page - 1) * 100 < total) {
-    const response = await fetch(`https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'true', 'X-Time-Zone': 'America/Mexico_City' } });
-    const data = await response.json();
+    let response = await fetch(`https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'true', 'X-Time-Zone': 'America/Mexico_City' } });
+    let data = await response.json();
     if (!response.ok) throw new Error(data.error || data.message || 'No fue posible consultar los vehículos de Motive.');
     // Motive has returned both direct and data-wrapped lists across API versions.
-    const vehicles = Array.isArray(data) ? data : data.vehicles || data.vehicle_locations || data.data?.vehicles || data.data?.vehicle_locations || data.data?.items || data.data || [];
+    let vehicles = Array.isArray(data) ? data : data.vehicles || data.vehicle_locations || data.data?.vehicles || data.data?.vehicle_locations || data.data?.items || data.data || [];
     if (!Array.isArray(vehicles)) throw new Error(`Motive no devolvio una lista de vehiculos. Campos recibidos: ${Object.keys(data).join(', ') || 'ninguno'}.`);
+    if (!vehicles.length && page === 1) {
+      response = await fetch(`https://api.gomotive.com/v1/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'true', 'X-Time-Zone': 'America/Mexico_City' } });
+      data = await response.json();
+      if (!response.ok) throw new Error(data.error || data.message || 'Motive no permitio consultar las ubicaciones v1.');
+      vehicles = Array.isArray(data) ? data : data.vehicles || data.vehicle_locations || data.data?.vehicles || data.data?.vehicle_locations || data.data?.items || data.data || [];
+      if (!Array.isArray(vehicles)) throw new Error(`Motive no devolvio una lista v1. Campos recibidos: ${Object.keys(data).join(', ') || 'ninguno'}.`);
+      motiveEndpoint = 'v1';
+    }
     responseShape = Array.isArray(data) ? ['array'] : Object.keys(data);
     total = Number(data.total || data.pagination?.total || data.data?.total || vehicles.length);
     for (const vehicle of vehicles) {
@@ -130,7 +138,7 @@ async function syncMotiveVehicles() {
     page += 1;
   }
   await pool.query('UPDATE motive_connection SET last_synced_at = NOW() WHERE id = TRUE');
-  return { vehiclesReceived: received, unitsMatched: matched, unitsWithoutMatch: Math.max(received - matched, 0), motiveResponseFields: responseShape };
+  return { vehiclesReceived: received, unitsMatched: matched, unitsWithoutMatch: Math.max(received - matched, 0), motiveEndpoint, motiveResponseFields: responseShape };
 }
 
 async function handleApi(request, response, url) {
