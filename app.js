@@ -201,7 +201,9 @@ $('#unit-form').addEventListener('submit', async (event) => {
 function setAdminInterface(authenticated) {
   isAdmin = authenticated;
   $('#registros').hidden = !authenticated;
+  $('#unidades').hidden = !authenticated;
   $('#unit-form').hidden = !authenticated;
+  $('#units-link').hidden = !authenticated;
   $('#login-button').hidden = authenticated;
   $('#logout-button').hidden = !authenticated;
 }

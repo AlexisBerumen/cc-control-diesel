@@ -19,7 +19,7 @@
       <nav aria-label="Navegación principal">
         <a class="active" href="#registro">Registrar carga</a>
         <a id="records-link" href="#registros">Registros</a>
-        <a href="#unidades">Unidades</a>
+        <a id="units-link" href="#unidades" hidden>Unidades</a>
         <button id="login-button" class="nav-button" type="button">Acceso admin</button>
         <button id="logout-button" class="nav-button" type="button" hidden>Salir</button>
       </nav>
@@ -130,7 +130,7 @@
         <div class="table-wrap"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Unidad / chofer</th><th>Odómetro</th><th>Galones</th><th>Importe</th><th>Evidencias</th><th>Estado</th></tr></thead><tbody id="records-body"><tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr></tbody></table></div>
       </section>
 
-      <section id="unidades" class="card units-card">
+      <section id="unidades" class="card units-card" hidden>
         <div><p class="eyebrow">Catálogo</p><h2>Unidades registradas</h2><p class="muted">Este listado controla las unidades que los choferes pueden seleccionar.</p></div>
         <form id="unit-form" class="add-unit-form" hidden>
           <input id="new-unit-number" maxlength="12" placeholder="Núm. unidad" aria-label="Número de unidad" required />
