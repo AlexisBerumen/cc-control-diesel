@@ -300,9 +300,15 @@ $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numb
 $('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
 
 function exportRows() {
-  const headings = ['Folio', 'Fecha', 'Unidad', 'Chofer', 'Odómetro (millas)', 'Galones', 'Importe (MXN)', 'Estación'];
-  const rows = [...displayedRecords].reverse().map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.odometer, record.gallons, record.amount ?? '', record.station]);
+  const headings = ['Folio', 'Fecha', 'Unidad', 'Chofer', 'Odómetro (millas)', 'Galones', 'Importe (MXN)', 'Estación', 'Alerta de odómetro'];
+  const rows = [...displayedRecords].reverse().map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.odometer, record.gallons, record.amount ?? '', record.station, odometerExportAlert(record)]);
   return [headings, ...rows];
+}
+function odometerExportAlert(record) {
+  if (!record.odometerWarning) return '';
+  const difference = Number(record.odometerDifference || 0);
+  const reference = Number(record.odometerReference || 0);
+  return `ALERTA: +${number(difference)} mi vs. referencia ${number(reference)} mi. Verificar odómetro.`;
 }
 function downloadFile(blob, name) {
   const link = document.createElement('a');
@@ -343,12 +349,17 @@ function xlsxZip(files) {
 function exportExcel() {
   if (!displayedRecords.length) { showToast('No hay cargas en el rango seleccionado.'); return; }
   const rows = exportRows();
-  const sheetRows = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${spreadsheetColumn(columnIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${xmlEscape(spreadsheetValue(value))}</t></is></c>`).join('')}</row>`).join('');
+  const recordsForExport = [...displayedRecords].reverse();
+  const sheetRows = rows.map((row, rowIndex) => {
+    const warningStyle = rowIndex > 0 && recordsForExport[rowIndex - 1]?.odometerWarning ? ' s="1"' : '';
+    return `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${spreadsheetColumn(columnIndex)}${rowIndex + 1}"${warningStyle} t="inlineStr"><is><t>${xmlEscape(spreadsheetValue(value))}</t></is></c>`).join('')}</row>`;
+  }).join('');
   const files = [
-    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'],
+    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
     ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
     ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Cargas de diesel" sheetId="1" r:id="rId1"/></sheets></workbook>'],
-    ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'],
+    ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
+    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/></cellXfs></styleSheet>'],
     ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`]
   ];
   downloadFile(xlsxZip(files), `cargas-diesel-${new Date().toISOString().slice(0, 10)}.xlsx`);
