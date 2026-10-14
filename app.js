@@ -39,11 +39,29 @@ function lastOdometer(unitId) {
 function renderUnitCatalog() {
   $('#unit-catalog').innerHTML = units.length ? units.map(u => `<div class="catalog-unit"><strong>Unidad ${esc(u.number)}</strong><small>${esc(u.plates)} · ${esc(u.description)}</small></div>`).join('') : '<p class="muted">No hay unidades registradas.</p>';
 }
+function motiveAssignmentLabel(record) {
+  const labels = {
+    already_assigned: 'Motive: ya asignado',
+    updated: 'Motive: chofer actualizado',
+    pending: 'Motive: pendiente',
+    processing: 'Motive: verificando'
+  };
+  return labels[record.motiveAssignmentStatus] || 'Motive: no disponible';
+}
 function renderRecords() {
   const body = $('#records-body');
   if (!records.length) { body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr>'; return; }
   body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(r.plates)}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
 }
+const renderRecordsBase = renderRecords;
+renderRecords = function renderRecordsWithMotiveStatus() {
+  renderRecordsBase();
+  [...$('#records-body').querySelectorAll('tr')].forEach((row, index) => {
+    const record = [...records].reverse()[index];
+    if (!record || !row.lastElementChild) return;
+    row.lastElementChild.innerHTML = `<span class="status">Completo</span><br><small title="${esc(record.motiveAssignmentMessage || '')}">${esc(motiveAssignmentLabel(record))}</small>`;
+  });
+};
 function setUnit(unit) {
   selectedUnit = unit;
   $('#unit-search').value = unit.number;
@@ -177,7 +195,7 @@ $('#confirm-button').addEventListener('click', async e => {
   }
   confirmButton.disabled = false;
   if (isAdmin) { records.push(saved); renderRecords(); }
-  $('#confirm-dialog').close(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada correctamente.`); location.hash = '#registro';
+  $('#confirm-dialog').close(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada. ${motiveAssignmentLabel(saved)}`); location.hash = '#registro';
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
 $('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });

@@ -12,8 +12,8 @@ const motiveSyncIntervalMinutes = Math.max(15, Number(process.env.MOTIVE_SYNC_IN
 const maxGallonsPerLoad = 300;
 let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
-// This is the least-privilege scope needed to retrieve each vehicle's current odometer.
-const motiveScope = 'locations.vehicle_locations_list users.read';
+// It reads locations/users and can update only the permanent driver of a vehicle.
+const motiveScope = 'locations.vehicle_locations_list users.read vehicles.manage';
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 function sendJson(response, status, data) {
@@ -50,6 +50,7 @@ async function initializeDatabase() {
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer NUMERIC(12,2);
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_unit TEXT;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_updated_at TIMESTAMPTZ;
+    ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_permanent_driver_id TEXT;
     ALTER TABLE fuel_records ALTER COLUMN amount DROP NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_amount_check;
     ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_amount_check CHECK (amount IS NULL OR amount > 0);
@@ -63,6 +64,9 @@ async function initializeDatabase() {
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS driver_id TEXT REFERENCES drivers(id);
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS ticket_url TEXT;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_url TEXT;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS motive_assignment_status TEXT;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS motive_assignment_message TEXT;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS motive_assignment_updated_at TIMESTAMPTZ;
     UPDATE fuel_records SET driver_name = 'No registrado' WHERE driver_name IS NULL;
     ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
@@ -156,6 +160,50 @@ async function getMotiveAccessToken() {
   const tokens = await requestMotiveToken({ grant_type: 'refresh_token', refresh_token: decryptSecret(connection.encrypted_refresh_token) });
   await saveMotiveTokens(tokens);
   return tokens.access_token;
+}
+async function readMotiveResponse(response) {
+  const text = await response.text();
+  try { return text ? JSON.parse(text) : {}; }
+  catch { return { message: `Motive returned an invalid response (HTTP ${response.status}).` }; }
+}
+function motiveErrorMessage(data, fallback) {
+  const error = data?.error;
+  return data?.error_description || data?.message || (typeof error === 'string' ? error : error?.message) || fallback;
+}
+function permanentDriverIdFromVehicle(data) {
+  const vehicle = data?.vehicle || data?.data?.vehicle || data?.data || data || {};
+  const driver = vehicle.permanent_driver || vehicle.permanentDriver || vehicle.driver;
+  const id = vehicle.permanent_driver_id ?? vehicle.permanentDriverId ?? driver?.id ?? driver?.driver_id ?? driver?.driverId;
+  return id === undefined || id === null || id === '' ? null : String(id);
+}
+async function synchronizeMotivePermanentDriver(unit, driver) {
+  if (!unit.motive_vehicle_id) return { status: 'pending', message: 'La unidad aun no esta vinculada con Motive. Se actualizara al sincronizarla.' };
+  if (!driver.motive_driver_id) return { status: 'pending', message: 'El chofer no tiene identificador de Motive.' };
+  try {
+    const accessToken = await getMotiveAccessToken();
+    const headers = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' };
+    const vehicleUrl = `https://api.gomotive.com/v1/vehicles/${encodeURIComponent(unit.motive_vehicle_id)}`;
+    const currentResponse = await fetch(vehicleUrl, { headers });
+    const currentData = await readMotiveResponse(currentResponse);
+    if (!currentResponse.ok) throw new Error(motiveErrorMessage(currentData, 'No fue posible consultar la unidad en Motive.'));
+    const currentDriverId = permanentDriverIdFromVehicle(currentData);
+    if (currentDriverId === String(driver.motive_driver_id)) {
+      await pool.query('UPDATE units SET motive_permanent_driver_id = $1 WHERE id = $2', [currentDriverId, unit.id]);
+      return { status: 'already_assigned', message: 'El chofer ya estaba asignado en Motive.' };
+    }
+    const updateResponse = await fetch(vehicleUrl, {
+      method: 'PUT',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permanent_driver_id: Number(driver.motive_driver_id) })
+    });
+    const updateData = await readMotiveResponse(updateResponse);
+    if (!updateResponse.ok) throw new Error(motiveErrorMessage(updateData, 'No fue posible actualizar el chofer en Motive.'));
+    await pool.query('UPDATE units SET motive_permanent_driver_id = $1 WHERE id = $2', [String(driver.motive_driver_id), unit.id]);
+    return { status: 'updated', message: 'Chofer permanente actualizado en Motive.' };
+  } catch (error) {
+    console.error(`No fue posible sincronizar el chofer de la unidad ${unit.number} con Motive:`, error.message);
+    return { status: 'pending', message: `Pendiente de Motive: ${cleanText(error.message, 180) || 'error de conexion.'}` };
+  }
 }
 async function syncMotiveVehicles() {
   if (motiveSyncPromise) return motiveSyncPromise;
@@ -317,7 +365,7 @@ async function handleApi(request, response, url) {
   }
   if (url.pathname === '/api/records' && request.method === 'GET') {
     if (!await requireAdmin(request, response)) return true;
-    const result = await pool.query('SELECT id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl" FROM fuel_records ORDER BY created_at ASC');
+    const result = await pool.query('SELECT id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", motive_assignment_status AS "motiveAssignmentStatus", motive_assignment_message AS "motiveAssignmentMessage", motive_assignment_updated_at AS "motiveAssignmentUpdatedAt" FROM fuel_records ORDER BY created_at ASC');
     sendJson(response, 200, result.rows); return true;
   }
   if (url.pathname === '/api/records' && request.method === 'POST') {
@@ -325,19 +373,24 @@ async function handleApi(request, response, url) {
     const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), gallons = Number(body.gallons), amount = body.amount === null || body.amount === '' || body.amount === undefined ? null : Number(body.amount);
     const driverId = cleanText(body.driverId, 100), station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180), ticketUrl = cleanText(body.ticketUrl, 1_000), odometerUrl = cleanText(body.odometerUrl, 1_000);
     if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !driverId || !station || !ticketFile || !odometerFile || !isCloudinaryEvidenceUrl(ticketUrl) || !isCloudinaryEvidenceUrl(odometerUrl)) { sendJson(response, 400, { error: `Datos de carga incompletos o no válidos. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
-    const unitResult = await pool.query('SELECT id, number, identifier FROM units WHERE id = $1', [body.unitId]);
+    const unitResult = await pool.query('SELECT id, number, identifier, motive_vehicle_id FROM units WHERE id = $1', [body.unitId]);
     if (!unitResult.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada no existe.' }); return true; }
-    const driverResult = await pool.query('SELECT id, name FROM drivers WHERE id = $1 AND active = TRUE', [driverId]);
+    const driverResult = await pool.query('SELECT id, name, motive_driver_id FROM drivers WHERE id = $1 AND active = TRUE', [driverId]);
     if (!driverResult.rowCount) { sendJson(response, 400, { error: 'Selecciona un chofer válido de la lista.' }); return true; }
     const unit = unitResult.rows[0], driver = driverResult.rows[0], client = await pool.connect();
+    let savedRecord;
     try {
       await client.query('BEGIN');
-      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file, ticket_url, odometer_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, ticketFile, odometerFile, ticketUrl, odometerUrl]);
+      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file, ticket_url, odometer_url, motive_assignment_status, motive_assignment_message) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, ticketFile, odometerFile, ticketUrl, odometerUrl, 'processing', 'Validando asignacion con Motive...']);
       const row = inserted.rows[0], folio = `DC-${new Date(row.created_at).getFullYear()}-${String(row.record_id).padStart(5, '0')}`;
       const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl"', [folio, row.record_id]);
-      await client.query('COMMIT'); sendJson(response, 201, saved.rows[0]);
+      await client.query('COMMIT'); savedRecord = saved.rows[0];
     } catch (error) { await client.query('ROLLBACK'); if (error.code === '23505') sendJson(response, 409, { error: 'Esta carga ya fue registrada.' }); else throw error; }
     finally { client.release(); }
+    if (!savedRecord) return true;
+    const assignment = await synchronizeMotivePermanentDriver(unit, driver);
+    const assignmentResult = await pool.query('UPDATE fuel_records SET motive_assignment_status = $1, motive_assignment_message = $2, motive_assignment_updated_at = NOW() WHERE id = $3 RETURNING motive_assignment_status AS "motiveAssignmentStatus", motive_assignment_message AS "motiveAssignmentMessage", motive_assignment_updated_at AS "motiveAssignmentUpdatedAt"', [assignment.status, assignment.message, savedRecord.id]);
+    sendJson(response, 201, { ...savedRecord, ...assignmentResult.rows[0] });
     return true;
   }
   return false;
