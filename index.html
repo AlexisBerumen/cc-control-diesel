@@ -154,6 +154,11 @@
       <form method="dialog"><button class="close-dialog" value="cancel" aria-label="Cerrar">×</button></form>
       <p class="eyebrow">Confirma la información</p><h2>¿Todo coincide con tus evidencias?</h2>
       <div id="dialog-summary" class="dialog-summary"></div>
+      <div id="dialog-odometer-warning" class="dialog-odometer-warning" role="alert" hidden>
+        <strong>⚠ Revisa el odómetro antes de continuar</strong>
+        <p id="dialog-odometer-warning-text"></p>
+        <label class="warning-confirm"><input id="odometer-warning-confirm" type="checkbox" /> Ya verifiqué que el odómetro es correcto.</label>
+      </div>
       <div class="dialog-actions"><button id="edit-button" class="secondary-button" value="cancel">Corregir</button><button id="confirm-button" class="primary-button" value="confirm">Confirmar y guardar</button></div>
     </dialog>
     <dialog id="success-dialog" class="confirmation-dialog success-dialog">

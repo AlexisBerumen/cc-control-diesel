@@ -50,6 +50,11 @@ input:focus { border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12
 .success-icon { display: grid; width: 72px; height: 72px; place-items: center; border-radius: 50%; background: #e8f7ee; color: #147a51; font-size: 42px; font-weight: 700; }
 .success-folio { margin: 6px 0 10px; padding: 11px 14px; border-radius: 9px; background: #eef2ff; color: #1b3584; font-size: 17px; font-weight: 700; }
 .success-dialog .primary-button { min-width: 220px; }
+.dialog-odometer-warning { margin: 16px 0; padding: 14px; border: 1px solid #e0ad31; border-radius: 10px; background: #fff6d8; color: #754d00; }
+.dialog-odometer-warning strong { display: block; font-size: 15px; }
+.dialog-odometer-warning p { margin: 7px 0 12px; font-size: 13px; line-height: 1.4; }
+.warning-confirm { display: flex; align-items: flex-start; gap: 9px; margin: 0; color: #5f4100; font-size: 13px; font-weight: 700; line-height: 1.35; cursor: pointer; }
+.warning-confirm input { width: 20px; height: 20px; flex: 0 0 20px; margin: 0; accent-color: #b87a00; }
 .divider { border-color: #e2e7f2; }
 .unit-confirmation { border-color: #bde4cc; }
 .upload-box { border-color: #b9c7e2; background: #f9faff; border-radius: 13px; }

@@ -248,6 +248,8 @@ function resetFuelForm() {
   $('#fuel-form').reset(); selectedUnit = null; selectedDriver = null; $('#selected-unit').hidden = true; $('#selected-driver').hidden = true; $('#unit-options').hidden = true; $('#driver-options').hidden = true; $('#odometer-note').textContent = 'Selecciona una unidad para validar el kilometraje.';
   $('#odometer-warning').textContent = '';
   $('#odometer').classList.remove('input-invalid', 'input-warning');
+  $('#dialog-odometer-warning').hidden = true;
+  $('#odometer-warning-confirm').checked = false;
   document.querySelectorAll('.upload-box').forEach(el => { el.classList.remove('has-file'); el.querySelector('.file-name').textContent = 'Toca aquí para tomar la foto'; });
   document.querySelectorAll('.error').forEach(el => el.textContent = ''); updateReview();
 }
@@ -266,16 +268,27 @@ $('#odometer').addEventListener('input', () => { formatOdometerInput(); validate
 const evidenceBoxes = { 'ticket-photo': '#ticket-box', 'odometer-photo': '#odometer-box' };
 Object.entries(evidenceBoxes).forEach(([inputId, boxSelector]) => $(`#${inputId}`).addEventListener('change', e => { const box = $(boxSelector); const name = e.target.files[0]?.name; box.classList.toggle('has-file', Boolean(name)); box.querySelector('.file-name').textContent = name || 'Tomar o seleccionar foto'; updateReview(); }));
 
+$('#odometer-warning-confirm').addEventListener('change', () => {
+  $('#confirm-button').disabled = !$('#odometer-warning-confirm').checked;
+});
+$('#edit-button').addEventListener('click', () => $('#confirm-dialog').close());
+
 $('#fuel-form').addEventListener('submit', e => {
   e.preventDefault(); if (!validate()) { showToast('Revisa los campos marcados antes de continuar.'); return; }
   const amountValue = $('#amount').value.trim();
   const caution = odometerCaution();
   const values = [['Unidad', `${selectedUnit.number} · ${unitDescription(selectedUnit)}`], ['Chofer', selectedDriver.name], ['Odómetro', `${number(odometerValue())} mi`], ['Galones', `${number($('#gallons').value)} gal`], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica'], ['Estación', $('#station').value.trim()]];
   if (caution) values.splice(3, 0, ['Alerta', `Revisar: +${number(caution.difference)} mi vs. referencia`]);
-  $('#dialog-summary').innerHTML = values.map(([k,v]) => `<p><span>${k}</span><strong>${esc(v)}</strong></p>`).join(''); $('#confirm-dialog').showModal();
+  $('#dialog-summary').innerHTML = values.map(([k,v]) => `<p><span>${k}</span><strong>${esc(v)}</strong></p>`).join('');
+  $('#dialog-odometer-warning').hidden = !caution;
+  $('#odometer-warning-confirm').checked = false;
+  $('#confirm-button').disabled = Boolean(caution);
+  if (caution) $('#dialog-odometer-warning-text').textContent = `La lectura está ${number(caution.difference)} millas arriba de la referencia. Si ya revisaste la foto y el número es correcto, marca la casilla para continuar.`;
+  $('#confirm-dialog').showModal();
 });
 $('#confirm-button').addEventListener('click', async e => {
   e.preventDefault();
+  if (!$('#dialog-odometer-warning').hidden && !$('#odometer-warning-confirm').checked) { showToast('Confirma que verificaste el odómetro antes de continuar.'); return; }
   const now = new Date();
   const amountValue = $('#amount').value.trim();
   const confirmButton = $('#confirm-button');
