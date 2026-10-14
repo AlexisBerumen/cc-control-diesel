@@ -19,9 +19,10 @@ let toastTimer;
 let isAdmin = false;
 let userRole = null;
 let activeRecordsRange = { from: '', to: '' };
-let displayedRecords = [];
+let recordsPagination = { page: 1, limit: 20, total: 0, totalPages: 1 };
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
+const recordsPageSize = 20;
 
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
@@ -61,69 +62,91 @@ function motiveAssignmentLabel(record) {
   };
   return labels[record.motiveAssignmentStatus] || 'Motive: no disponible';
 }
-function renderRecords() {
-  const body = $('#records-body');
-  if (!records.length) { body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr>'; return; }
-  body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(recordUnitDescription(r))}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
+function recordsSearchParams({ page = recordsPagination.page, exportAll = false } = {}) {
+  const params = new URLSearchParams({ page: String(page), limit: String(recordsPageSize) });
+  if (activeRecordsRange.from) params.set('from', activeRecordsRange.from);
+  if (activeRecordsRange.to) params.set('to', activeRecordsRange.to);
+  if (exportAll) params.set('export', '1');
+  return params;
 }
-function filteredRecords() {
-  const from = activeRecordsRange.from ? new Date(`${activeRecordsRange.from}T00:00:00`).getTime() : -Infinity;
-  const to = activeRecordsRange.to ? new Date(`${activeRecordsRange.to}T23:59:59.999`).getTime() : Infinity;
-  return records.filter((record) => {
-    const time = new Date(record.createdAt).getTime();
-    return Number.isFinite(time) && time >= from && time <= to;
-  });
+async function requestRecords({ page = recordsPagination.page, exportAll = false } = {}) {
+  const response = await fetch(`/api/records?${recordsSearchParams({ page, exportAll }).toString()}`);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No fue posible consultar los registros.');
+  return data;
+}
+async function loadRecordsPage(page = 1) {
+  const data = await requestRecords({ page });
+  records = data.records || [];
+  recordsPagination = data.pagination || { page: 1, limit: recordsPageSize, total: records.length, totalPages: 1 };
+  renderRecords();
 }
 function updateRecordsFilterSummary() {
   const summary = $('#records-filter-summary');
+  const total = Number(recordsPagination.total || 0);
+  if (!total) {
+    summary.textContent = activeRecordsRange.from || activeRecordsRange.to ? 'No hay cargas en el rango seleccionado.' : 'Aún no hay cargas registradas.';
+    return;
+  }
+  const first = (Number(recordsPagination.page) - 1) * Number(recordsPagination.limit) + 1;
+  const last = first + records.length - 1;
   if (!activeRecordsRange.from && !activeRecordsRange.to) {
-    summary.textContent = `Mostrando ${displayedRecords.length} carga(s), de la más reciente hacia atrás.`;
+    summary.textContent = `Mostrando ${first}–${last} de ${total} carga(s), de la más reciente hacia atrás.`;
     return;
   }
   const range = [activeRecordsRange.from && `desde ${activeRecordsRange.from}`, activeRecordsRange.to && `hasta ${activeRecordsRange.to}`].filter(Boolean).join(' ');
-  summary.textContent = `Mostrando ${displayedRecords.length} carga(s) ${range}.`;
+  summary.textContent = `Mostrando ${first}–${last} de ${total} carga(s) ${range}.`;
 }
-const renderRecordsBase = renderRecords;
-renderRecords = function renderRecordsWithMotiveStatus() {
-  displayedRecords = filteredRecords();
-  const allRecords = records;
-  records = displayedRecords;
-  renderRecordsBase();
-  records = allRecords;
+function updateRecordsPagination() {
+  const controls = $('#records-pagination');
+  const totalPages = Number(recordsPagination.totalPages || 1);
+  const page = Number(recordsPagination.page || 1);
+  controls.hidden = Number(recordsPagination.total || 0) === 0;
+  $('#records-previous-page').disabled = page <= 1;
+  $('#records-next-page').disabled = page >= totalPages;
+  $('#records-page-summary').textContent = totalPages > 1 ? `Página ${page} de ${totalPages}` : 'Página 1 de 1';
+}
+function renderRecords() {
+  const body = $('#records-body');
+  if (!records.length) body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr>';
+  else body.innerHTML = records.map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(recordUnitDescription(r))}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
   const renderedRows = [...$('#records-body').querySelectorAll('tr')];
   renderedRows.forEach((row, index) => {
-    const record = [...displayedRecords].reverse()[index];
+    const record = records[index];
     if (!record || !record.odometerWarning) return;
     const difference = Number(record.odometerDifference || 0);
     row.classList.add('odometer-warning-row');
     if (row.children[3]) row.children[3].innerHTML = `${number(record.odometer)} mi<br><small class="odometer-warning-badge">⚠ Revisar: +${number(difference)} mi vs. referencia</small>`;
   });
-  if (userRole !== 'admin') { updateRecordsFilterSummary(); return; }
-  renderedRows.forEach((row, index) => {
-    const record = [...displayedRecords].reverse()[index];
+  if (userRole === 'admin') renderedRows.forEach((row, index) => {
+    const record = records[index];
     if (!record || !row.lastElementChild) return;
     row.lastElementChild.innerHTML = `<span class="status">Completo</span><br><small title="${esc(record.motiveAssignmentMessage || '')}">${esc(motiveAssignmentLabel(record))}</small>`;
     const motiveOdometer = Number(units.find((unit) => unit.id === record.unitId)?.motiveOdometer || 0);
     if (motiveOdometer && Number(record.odometer) > motiveOdometer + maxOdometerJump) row.lastElementChild.insertAdjacentHTML('beforeend', `<br><button class="odometer-reset" type="button" data-reset-odometer="${esc(record.id)}">Corregir con Motive</button>`);
   });
   updateRecordsFilterSummary();
-};
-function applyRecordsFilter() {
+  updateRecordsPagination();
+}
+async function applyRecordsFilter() {
   const from = $('#records-date-from').value;
   const to = $('#records-date-to').value;
   if (from && to && from > to) { showToast('La fecha inicial no puede ser posterior a la fecha final.'); return; }
   activeRecordsRange = { from, to };
-  renderRecords();
+  try { await loadRecordsPage(1); }
+  catch (error) { showToast(error.message || 'No fue posible filtrar los registros.'); }
 }
 $('#apply-records-filter').addEventListener('click', applyRecordsFilter);
-$('#records-date-from').addEventListener('change', () => { if (!$('#records-date-to').value || $('#records-date-from').value <= $('#records-date-to').value) applyRecordsFilter(); });
-$('#records-date-to').addEventListener('change', () => { if (!$('#records-date-from').value || $('#records-date-from').value <= $('#records-date-to').value) applyRecordsFilter(); });
+$('#records-date-from').addEventListener('change', () => { if (!$('#records-date-to').value || $('#records-date-from').value <= $('#records-date-to').value) void applyRecordsFilter(); });
+$('#records-date-to').addEventListener('change', () => { if (!$('#records-date-from').value || $('#records-date-from').value <= $('#records-date-to').value) void applyRecordsFilter(); });
 $('#clear-records-filter').addEventListener('click', () => {
   $('#records-date-from').value = '';
   $('#records-date-to').value = '';
   activeRecordsRange = { from: '', to: '' };
-  renderRecords();
+  void loadRecordsPage(1).catch((error) => showToast(error.message || 'No fue posible actualizar los registros.'));
 });
+$('#records-previous-page').addEventListener('click', () => void loadRecordsPage(Math.max(1, Number(recordsPagination.page) - 1)).catch((error) => showToast(error.message || 'No fue posible cambiar de página.')));
+$('#records-next-page').addEventListener('click', () => void loadRecordsPage(Number(recordsPagination.page) + 1).catch((error) => showToast(error.message || 'No fue posible cambiar de página.')));
 $('#records-body').addEventListener('click', async (event) => {
   const button = event.target.closest('[data-reset-odometer]');
   if (!button || userRole !== 'admin') return;
@@ -311,7 +334,10 @@ $('#confirm-button').addEventListener('click', async e => {
     return;
   }
   confirmButton.disabled = false;
-  if (isAdmin) { records.push(saved); renderRecords(); }
+  if (isAdmin) {
+    try { await loadRecordsPage(1); }
+    catch { /* La carga ya se guardó; el historial se actualizará al volver a abrirlo. */ }
+  }
   $('#confirm-dialog').close();
   resetFuelForm();
   $('#success-folio').textContent = `Folio de carga: ${saved.folio}`;
@@ -319,12 +345,9 @@ $('#confirm-button').addEventListener('click', async e => {
   showToast(`Carga ${saved.folio} guardada.`);
   location.hash = '#registro';
 });
-$('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
-$('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
-
-function exportRows() {
+function exportRows(recordsForExport) {
   const headings = ['Folio', 'Fecha', 'Unidad', 'Chofer', 'Odómetro (millas)', 'Galones', 'Importe (MXN)', 'Estación', 'Alerta de odómetro'];
-  const rows = [...displayedRecords].reverse().map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.odometer, record.gallons, record.amount ?? '', record.station, odometerExportAlert(record)]);
+  const rows = recordsForExport.map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.odometer, record.gallons, record.amount ?? '', record.station, odometerExportAlert(record)]);
   return [headings, ...rows];
 }
 function odometerExportAlert(record) {
@@ -340,10 +363,22 @@ function downloadFile(blob, name) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1_000);
 }
-function exportCsv() {
-  if (!displayedRecords.length) { showToast('No hay cargas en el rango seleccionado.'); return; }
-  const csv = exportRows().map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n');
-  downloadFile(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }), `cargas-diesel-${new Date().toISOString().slice(0, 10)}.csv`);
+async function loadRecordsForExport() {
+  const data = await requestRecords({ page: 1, exportAll: true });
+  if (data.pagination?.exportTruncated) throw new Error('Hay más de 10,000 cargas en este rango. Reduce las fechas antes de exportar.');
+  return data.records || [];
+}
+async function exportCsv() {
+  const button = $('#export-csv');
+  button.disabled = true;
+  try {
+    showToast('Preparando archivo CSV...');
+    const recordsForExport = await loadRecordsForExport();
+    if (!recordsForExport.length) { showToast('No hay cargas en el rango seleccionado.'); return; }
+    const csv = exportRows(recordsForExport).map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n');
+    downloadFile(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }), `cargas-diesel-${new Date().toISOString().slice(0, 10)}.csv`);
+  } catch (error) { showToast(error.message || 'No fue posible exportar el CSV.'); }
+  finally { button.disabled = false; }
 }
 function xmlEscape(value) { return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;'); }
 function spreadsheetValue(value) { const text = String(value ?? ''); return /^[=+\-@]/.test(text) ? `'${text}` : text; }
@@ -369,32 +404,48 @@ function xlsxZip(files) {
   write32(end, 0, 0x06054b50); write16(end, 8, files.length); write16(end, 10, files.length); write32(end, 12, centralSize); write32(end, 16, offset);
   return new Blob([...parts, ...central, end], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
-function exportExcel() {
-  if (!displayedRecords.length) { showToast('No hay cargas en el rango seleccionado.'); return; }
-  const rows = exportRows();
-  const recordsForExport = [...displayedRecords].reverse();
+function spreadsheetCell(value, cellReference, styleIndex, numeric) {
+  const numericValue = Number(value);
+  if (numeric && value !== '' && value !== null && value !== undefined && Number.isFinite(numericValue)) return `<c r="${cellReference}"${styleIndex ? ` s="${styleIndex}"` : ''}><v>${numericValue}</v></c>`;
+  return `<c r="${cellReference}"${styleIndex ? ` s="${styleIndex}"` : ''} t="inlineStr"><is><t>${xmlEscape(spreadsheetValue(value))}</t></is></c>`;
+}
+function exportExcelFile(recordsForExport) {
+  const rows = exportRows(recordsForExport);
   const sheetRows = rows.map((row, rowIndex) => {
-    const warningStyle = rowIndex > 0 && recordsForExport[rowIndex - 1]?.odometerWarning ? ' s="1"' : '';
-    return `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${spreadsheetColumn(columnIndex)}${rowIndex + 1}"${warningStyle} t="inlineStr"><is><t>${xmlEscape(spreadsheetValue(value))}</t></is></c>`).join('')}</row>`;
+    const warning = rowIndex > 0 && recordsForExport[rowIndex - 1]?.odometerWarning;
+    return `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => {
+      const numeric = rowIndex > 0 && [4, 5, 6].includes(columnIndex);
+      const styleIndex = numeric ? (warning ? 3 : 2) : (warning ? 1 : 0);
+      return spreadsheetCell(value, `${spreadsheetColumn(columnIndex)}${rowIndex + 1}`, styleIndex, numeric);
+    }).join('')}</row>`;
   }).join('');
+  const columnWidths = [18, 23, 16, 26, 20, 13, 17, 22, 48].map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join('');
   const files = [
     ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
     ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
     ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Cargas de diesel" sheetId="1" r:id="rId1"/></sheets></workbook>'],
     ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
-    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/></cellXfs></styleSheet>'],
-    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`]
+    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="4" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1" applyNumberFormat="1"/></cellXfs></styleSheet>'],
+    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${columnWidths}</cols><sheetData>${sheetRows}</sheetData><autoFilter ref="A1:I${rows.length}"/></worksheet>`]
   ];
   downloadFile(xlsxZip(files), `cargas-diesel-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
-const csvButton = $('#export-csv').cloneNode(true);
-$('#export-csv').replaceWith(csvButton);
-csvButton.addEventListener('click', exportCsv);
+async function exportExcel() {
+  const button = $('#export-excel');
+  button.disabled = true;
+  try {
+    showToast('Preparando archivo Excel...');
+    const recordsForExport = await loadRecordsForExport();
+    if (!recordsForExport.length) { showToast('No hay cargas en el rango seleccionado.'); return; }
+    exportExcelFile(recordsForExport);
+  } catch (error) { showToast(error.message || 'No fue posible exportar el Excel.'); }
+  finally { button.disabled = false; }
+}
+$('#export-csv').addEventListener('click', exportCsv);
 $('#export-excel').addEventListener('click', exportExcel);
 
 $('#unit-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  event.stopImmediatePropagation();
   const numberInput = $('#new-unit-number');
   const number = numberInput.value.trim().toUpperCase();
   const plates = $('#new-unit-plates').value.trim().toUpperCase();
@@ -406,7 +457,7 @@ $('#unit-form').addEventListener('submit', async (event) => {
     if (!response.ok) throw new Error(saved.error || 'No fue posible agregar la unidad.');
     units.push(saved); save(STORAGE.units, units); event.currentTarget.reset(); renderUnitCatalog(); showToast(`Unidad ${number} agregada al catálogo.`);
   } catch (error) { showToast(error.message || 'No se pudo conectar a la base de datos.'); }
-}, { capture: true });
+});
 
 function setAdminInterface(authenticated, role = null) {
   isAdmin = authenticated;
@@ -433,13 +484,14 @@ async function synchronizeWithDatabase() {
     if (unitsResponse.ok) { units = await unitsResponse.json(); save(STORAGE.units, units); }
     if (driversResponse.ok) { drivers = await driversResponse.json(); save(STORAGE.drivers, drivers); }
     if (admin) {
-      const recordsResponse = await fetch('/api/records');
-      if (recordsResponse.ok) { records = await recordsResponse.json(); }
+      await loadRecordsPage(1);
     } else {
       records = [];
+      recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
       localStorage.removeItem(STORAGE.records);
+      renderRecords();
     }
-    renderUnitCatalog(); renderRecords(); updateReview();
+    renderUnitCatalog(); updateReview();
   } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
 }
 
@@ -475,6 +527,7 @@ $('#login-form').addEventListener('submit', async (event) => {
 $('#logout-button').addEventListener('click', async () => {
   try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* La interfaz se cierra aun si hubo un problema de red. */ }
   records = [];
+  recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
   localStorage.removeItem(STORAGE.records);
   setAdminInterface(false);
   renderRecords();

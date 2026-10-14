@@ -12,6 +12,10 @@ const motiveSyncIntervalMinutes = Math.max(15, Number(process.env.MOTIVE_SYNC_IN
 const maxGallonsPerLoad = 300;
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
+const recordsPageSize = 20;
+const maxRecordsPageSize = 100;
+const maxRecordsExport = 10_000;
+const businessTimeZone = process.env.BUSINESS_TIME_ZONE || 'America/Mexico_City';
 let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
 // It reads locations/users and can update only the permanent driver of a vehicle.
@@ -79,6 +83,8 @@ async function initializeDatabase() {
     ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
     ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_gallons_check CHECK (gallons > 0 AND gallons <= 300);
+    CREATE INDEX IF NOT EXISTS fuel_records_created_at_idx ON fuel_records (created_at DESC, record_id DESC);
+    CREATE INDEX IF NOT EXISTS fuel_records_unit_odometer_idx ON fuel_records (unit_id, odometer DESC);
     CREATE TABLE IF NOT EXISTS motive_connection (
       id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id), encrypted_access_token TEXT NOT NULL,
       encrypted_refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
@@ -104,6 +110,26 @@ function readJson(request, maxBytes = 100_000) {
   });
 }
 function cleanText(value, maxLength) { return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''; }
+function isIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+function recordsDateFilter(url) {
+  const from = url.searchParams.get('from') || '';
+  const to = url.searchParams.get('to') || '';
+  if ((from && !isIsoDate(from)) || (to && !isIsoDate(to)) || (from && to && from > to)) throw new Error('El rango de fechas no es válido.');
+  const values = [], conditions = [];
+  if (from) {
+    values.push(from, businessTimeZone);
+    conditions.push(`created_at >= ($${values.length - 1}::date::timestamp AT TIME ZONE $${values.length})`);
+  }
+  if (to) {
+    values.push(to, businessTimeZone);
+    conditions.push(`created_at < ((($${values.length - 1}::date + 1)::timestamp) AT TIME ZONE $${values.length})`);
+  }
+  return { from, to, values, where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '' };
+}
 function parseCookies(request) { return Object.fromEntries((request.headers.cookie || '').split(';').map((part) => { const index = part.indexOf('='); return index < 0 ? [] : [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1))]; }).filter((part) => part.length)); }
 function sessionHash(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 function secureEquals(left, right) { const leftBuffer = Buffer.from(left || ''), rightBuffer = Buffer.from(right || ''); return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer); }
@@ -401,10 +427,26 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/records' && request.method === 'GET') {
     const session = await requireStaff(request, response);
     if (!session) return true;
+    let filter;
+    try { filter = recordsDateFilter(url); }
+    catch (error) { sendJson(response, 400, { error: error.message }); return true; }
+    const exportAll = url.searchParams.get('export') === '1';
+    const requestedPage = Number.parseInt(url.searchParams.get('page') || '1', 10);
+    const requestedLimit = Number.parseInt(url.searchParams.get('limit') || String(recordsPageSize), 10);
+    const limit = exportAll ? maxRecordsExport : Math.min(maxRecordsPageSize, Math.max(1, Number.isSafeInteger(requestedLimit) ? requestedLimit : recordsPageSize));
+    const requestedSafePage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
     const columns = 'id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", odometer_warning AS "odometerWarning", odometer_reference AS "odometerReference", odometer_difference AS "odometerDifference"';
     const motiveColumns = session.role === 'admin' ? ', motive_assignment_status AS "motiveAssignmentStatus", motive_assignment_message AS "motiveAssignmentMessage", motive_assignment_updated_at AS "motiveAssignmentUpdatedAt"' : '';
-    const result = await pool.query(`SELECT ${columns}${motiveColumns} FROM fuel_records ORDER BY created_at ASC`);
-    sendJson(response, 200, result.rows); return true;
+    const countResult = await pool.query(`SELECT COUNT(*)::integer AS total FROM fuel_records ${filter.where}`, filter.values);
+    const total = countResult.rows[0].total;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const page = exportAll ? 1 : Math.min(requestedSafePage, totalPages);
+    const values = [...filter.values, limit, (page - 1) * limit];
+    const result = await pool.query(`SELECT ${columns}${motiveColumns} FROM fuel_records ${filter.where} ORDER BY created_at DESC, record_id DESC LIMIT $${values.length - 1} OFFSET $${values.length}`, values);
+    sendJson(response, 200, {
+      records: result.rows,
+      pagination: { page, limit, total, totalPages, from: filter.from || null, to: filter.to || null, exportTruncated: exportAll && total > maxRecordsExport }
+    }); return true;
   }
   if (url.pathname === '/api/records' && request.method === 'POST') {
     const body = await readJson(request);
