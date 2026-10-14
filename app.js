@@ -47,8 +47,10 @@ function lastOdometer(unitId) {
   const motiveOdometer = Number(units.find(unit => unit.id === unitId)?.motiveOdometer || 0);
   return Math.max(recordOdometer, motiveOdometer) || undefined;
 }
+function unitDescription(unit) { return unit?.description || 'Sin descripción'; }
+function recordUnitDescription(record) { return unitDescription(units.find((unit) => unit.id === record.unitId)); }
 function renderUnitCatalog() {
-  $('#unit-catalog').innerHTML = units.length ? units.map(u => `<div class="catalog-unit"><strong>Unidad ${esc(u.number)}</strong><small>${esc(u.plates)} · ${esc(u.description)}</small></div>`).join('') : '<p class="muted">No hay unidades registradas.</p>';
+  $('#unit-catalog').innerHTML = units.length ? units.map(u => `<div class="catalog-unit"><strong>Unidad ${esc(u.number)}</strong><small>${esc(unitDescription(u))}</small></div>`).join('') : '<p class="muted">No hay unidades registradas.</p>';
 }
 function motiveAssignmentLabel(record) {
   const labels = {
@@ -62,7 +64,7 @@ function motiveAssignmentLabel(record) {
 function renderRecords() {
   const body = $('#records-body');
   if (!records.length) { body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr>'; return; }
-  body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(r.plates)}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
+  body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(recordUnitDescription(r))}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
 }
 function filteredRecords() {
   const from = activeRecordsRange.from ? new Date(`${activeRecordsRange.from}T00:00:00`).getTime() : -Infinity;
@@ -143,7 +145,7 @@ function setUnit(unit) {
   $('#unit-error').textContent = '';
   const last = lastOdometer(unit.id);
   $('#selected-unit').hidden = false;
-  $('#selected-unit').innerHTML = `<span>✓</span><div><strong>Unidad ${esc(unit.number)} seleccionada</strong><br><small>${esc(unit.plates)} · ${esc(unit.description)}</small></div>`;
+  $('#selected-unit').innerHTML = `<span>✓</span><div><strong>Unidad ${esc(unit.number)} seleccionada</strong><br><small>${esc(unitDescription(unit))}</small></div>`;
   $('#odometer-note').textContent = last ? `Odómetro de referencia (Motive o carga previa): ${number(last)} millas.` : 'Aún no hay kilometraje previo para esta unidad.';
   if ($('#odometer').value) validateOdometer(true);
   updateReview();
@@ -153,7 +155,7 @@ function updateSuggestions() {
   if (!query) { $('#unit-options').hidden = true; return; }
   const matches = units.filter(u => u.number.toLowerCase().includes(query)).slice(0, 6);
   const panel = $('#unit-options');
-  panel.innerHTML = matches.length ? matches.map(u => `<button class="suggestion" type="button" data-id="${u.id}" role="option"><strong>Unidad ${esc(u.number)}</strong><small>${esc(u.plates)} · ${esc(u.description)}</small></button>`).join('') : '<div class="suggestion"><strong>Sin coincidencias</strong><small>Esta unidad no está registrada.</small></div>';
+  panel.innerHTML = matches.length ? matches.map(u => `<button class="suggestion" type="button" data-id="${u.id}" role="option"><strong>Unidad ${esc(u.number)}</strong><small>${esc(unitDescription(u))}</small></button>`).join('') : '<div class="suggestion"><strong>Sin coincidencias</strong><small>Esta unidad no está registrada.</small></div>';
   panel.hidden = false;
 }
 function setDriver(driver) {
@@ -222,7 +224,7 @@ function validate(show = true) {
 function updateReview() {
   const gallons = Number($('#gallons').value), amountValue = $('#amount').value.trim(), amount = amountValue ? Number(amountValue) : null, odo = odometerValue(), driverName = selectedDriver?.name || '';
   const data = [
-    ['Unidad', selectedUnit ? `${selectedUnit.number} · ${selectedUnit.plates}` : '—'], ['Chofer', driverName || '—'],
+    ['Unidad', selectedUnit ? `${selectedUnit.number} · ${unitDescription(selectedUnit)}` : '—'], ['Chofer', driverName || '—'],
     ['Odómetro', odo ? `${number(odo)} mi${odometerCaution() ? ' ⚠' : ''}` : '—'], ['Galones', gallons ? `${number(gallons)} gal` : '—'],
     ['Importe', amount ? money(amount) : 'Bomba C&C / no aplica'], ['Precio por galón', gallons && amount ? money(amount / gallons) : 'No aplica'],
     ['Evidencias', $('#ticket-photo').files.length && $('#odometer-photo').files.length ? '2 de 2 adjuntas ✓' : `${$('#ticket-photo').files.length + $('#odometer-photo').files.length} de 2 adjuntas`]
@@ -265,7 +267,7 @@ $('#fuel-form').addEventListener('submit', e => {
   e.preventDefault(); if (!validate()) { showToast('Revisa los campos marcados antes de continuar.'); return; }
   const amountValue = $('#amount').value.trim();
   const caution = odometerCaution();
-  const values = [['Unidad', `${selectedUnit.number} · ${selectedUnit.plates}`], ['Chofer', selectedDriver.name], ['Odómetro', `${number(odometerValue())} mi`], ['Galones', `${number($('#gallons').value)} gal`], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica'], ['Estación', $('#station').value.trim()]];
+  const values = [['Unidad', `${selectedUnit.number} · ${unitDescription(selectedUnit)}`], ['Chofer', selectedDriver.name], ['Odómetro', `${number(odometerValue())} mi`], ['Galones', `${number($('#gallons').value)} gal`], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica'], ['Estación', $('#station').value.trim()]];
   if (caution) values.splice(3, 0, ['Alerta', `Revisar: +${number(caution.difference)} mi vs. referencia`]);
   $('#dialog-summary').innerHTML = values.map(([k,v]) => `<p><span>${k}</span><strong>${esc(v)}</strong></p>`).join(''); $('#confirm-dialog').showModal();
 });
