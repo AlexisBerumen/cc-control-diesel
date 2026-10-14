@@ -346,7 +346,7 @@ function serveStatic(request, response, url) {
   if (!['GET', 'HEAD'].includes(request.method)) { response.writeHead(405); response.end(); return; }
   const requestedPath = url.pathname === '/' ? '/index.html' : url.pathname;
   const filePath = path.resolve(publicDirectory, `.${decodeURIComponent(requestedPath)}`);
-  const allowed = filePath === path.join(publicDirectory, 'index.html') || filePath === path.join(publicDirectory, 'app.js') || filePath === path.join(publicDirectory, 'units.js') || filePath === path.join(publicDirectory, 'styles.css') || filePath.startsWith(path.join(publicDirectory, 'assets') + path.sep);
+  const allowed = filePath === path.join(publicDirectory, 'index.html') || filePath === path.join(publicDirectory, 'app.js') || filePath === path.join(publicDirectory, 'units.js') || filePath === path.join(publicDirectory, 'styles.css') || filePath === path.join(publicDirectory, 'brand.css') || filePath.startsWith(path.join(publicDirectory, 'assets') + path.sep);
   if (!allowed) { response.writeHead(404); response.end('Página no encontrada.'); return; }
   fs.readFile(filePath, (error, content) => {
     if (error) { response.writeHead(error.code === 'ENOENT' ? 404 : 500); response.end(error.code === 'ENOENT' ? 'Página no encontrada.' : 'Error del servidor.'); return; }

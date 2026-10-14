@@ -1,0 +1,71 @@
+/* Identidad visual C&C Transport: azul de carretera y rojo de acento. */
+:root {
+  --navy: #101d52;
+  --navy-2: #1d3487;
+  --orange: #dc2638;
+  --orange-2: #b9192a;
+  --sand: #f3f5fb;
+  --paper: #ffffff;
+  --line: #dce2f0;
+  --ink: #18264f;
+  --muted: #66759a;
+  --shadow: 0 16px 38px rgba(19, 36, 91, .12);
+}
+
+body { background: radial-gradient(circle at 6% 0%, #e7edff 0, transparent 30rem), var(--sand); }
+.topbar { min-height: 84px; background: linear-gradient(112deg, #0d1743 0%, #172d78 63%, #1a347f 100%); border-top: 4px solid #dc2638; box-shadow: 0 6px 20px rgba(13, 23, 67, .22); }
+.topbar nav { height: 80px; gap: 26px; }
+.topbar nav a, .nav-button { letter-spacing: .01em; }
+.topbar nav a:hover, .topbar nav .active, .nav-button:hover { border-color: #f04455; }
+.topbar .brand img { max-width: 154px; height: 59px; padding: 4px 6px; border-radius: 8px; box-shadow: 0 4px 13px rgba(0,0,0,.22); }
+main { max-width: 1220px; padding-top: 54px; }
+.page-heading { position: relative; padding: 8px 0 25px; margin-bottom: 30px; }
+.page-heading::after { content: ""; position: absolute; left: 0; bottom: 0; width: 94px; height: 4px; border-radius: 99px; background: linear-gradient(90deg, #dc2638 0 48%, #172d78 48%); }
+h1 { color: #101d52; font-size: clamp(32px, 4vw, 42px); }
+h2 { color: #172a63; }
+.intro { max-width: 590px; font-size: 16px; }
+.eyebrow { color: #c51c2f; }
+.secure-note { background: #eef2ff; color: #1b3584; border: 1px solid #d7dff7; box-shadow: 0 6px 14px rgba(23, 45, 120, .07); }
+.card { border-color: #dce2f0; border-radius: 18px; box-shadow: var(--shadow); }
+.form-card { border-top: 5px solid #1d3487; }
+.section-title { margin-bottom: 21px; }
+.step { background: linear-gradient(140deg, #1f3c96, #101d52); box-shadow: 0 4px 10px rgba(16, 29, 82, .18); }
+label { color: #1c2d60; }
+input { border-color: #cbd4e7; border-radius: 10px; }
+input:focus { border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12); }
+.suggestions { border-color: #cbd4e7; box-shadow: 0 12px 28px rgba(16, 29, 82, .16); }
+.suggestion:hover { background: #f4f6ff; }
+.divider { border-color: #e2e7f2; }
+.unit-confirmation { border-color: #bde4cc; }
+.upload-box { border-color: #b9c7e2; background: #f9faff; border-radius: 13px; }
+.upload-box:hover { border-color: #1d3487; background: #f0f3ff; transform: translateY(-2px); box-shadow: 0 8px 18px rgba(27, 52, 135, .09); }
+.upload-icon { color: #dc2638; }
+.primary-button { border-color: #dc2638; background: linear-gradient(120deg, #e33344, #c91e31); border-radius: 10px; box-shadow: 0 8px 16px rgba(201, 30, 49, .19); }
+.primary-button:hover { background: linear-gradient(120deg, #c91e31, #ae1425); border-color: #ae1425; transform: translateY(-1px); }
+.secondary-button { border-color: #bcc7df; border-radius: 10px; color: #1b3277; }
+.secondary-button:hover { background: #f0f3ff; border-color: #8799c5; }
+.review-card { background: linear-gradient(155deg, #172f7e, #101d52); border: 0; box-shadow: 0 18px 42px rgba(16, 29, 82, .27); }
+.review-card h2 { color: #fff; }
+.review-card .muted, .review-card .review-list dt { color: #d3dcf8; }
+.review-card .eyebrow { color: #ffabb4; }
+.review-card .review-list div { border-color: rgba(218, 227, 255, .2); }
+.review-card .review-list dd { color: #fff; }
+.review-card .review-tip { background: rgba(255,255,255,.1); color: #edf1ff; }
+.review-card .review-tip span { border-color: #aebde9; }
+.confirmation-dialog { border: 1px solid #dce2f0; border-top: 5px solid #dc2638; }
+.records-card, .units-card { border-top: 4px solid #1d3487; }
+th { background: #eef2ff; color: #324a91; }
+.catalog-unit { background: #f7f9ff; border-color: #d9e1f2; }
+.catalog-unit strong { color: #1b3584; }
+.nav-button { color: #dce4ff; }
+
+@media (max-width: 820px) {
+  .topbar { min-height: 76px; }
+  .topbar nav { height: 72px; gap: 14px; }
+  main { padding-top: 38px; }
+}
+@media (max-width: 530px) {
+  .topbar .brand img { max-width: 106px; height: 47px; }
+  .page-heading { padding-bottom: 20px; }
+  .secure-note { border-radius: 12px; }
+}
