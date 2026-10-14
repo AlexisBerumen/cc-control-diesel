@@ -241,8 +241,8 @@ $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numb
 $('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
 
 function exportRows() {
-  const headings = ['Folio', 'Fecha', 'Unidad', 'Chofer', 'Identificador', 'Odómetro (millas)', 'Galones', 'Importe (MXN)', 'Estación', 'Estado Motive', 'Detalle Motive', 'URL ticket', 'URL odómetro'];
-  const rows = [...displayedRecords].reverse().map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.plates, record.odometer, record.gallons, record.amount ?? '', record.station, motiveAssignmentLabel(record), record.motiveAssignmentMessage || '', record.ticketUrl || '', record.odometerUrl || '']);
+  const headings = ['Folio', 'Fecha', 'Unidad', 'Chofer', 'Odómetro (millas)', 'Galones', 'Importe (MXN)', 'Estación'];
+  const rows = [...displayedRecords].reverse().map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.odometer, record.gallons, record.amount ?? '', record.station]);
   return [headings, ...rows];
 }
 function downloadFile(blob, name) {
