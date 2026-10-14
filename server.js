@@ -80,8 +80,9 @@ async function initializeDatabase() {
       state TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL
     );
     CREATE TABLE IF NOT EXISTS admin_sessions (
-      token_hash TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );`);
+      token_hash TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'admin', expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin';`);
   for (const unit of loadSeedUnits()) await pool.query('INSERT INTO units (id, number, identifier, description) VALUES ($1, $2, $3, $4) ON CONFLICT (number) DO NOTHING', [unit.id, unit.number, unit.identifier, unit.description]);
   databaseReady = true;
   console.log('PostgreSQL conectado y catálogo de unidades preparado.');
@@ -98,13 +99,20 @@ function cleanText(value, maxLength) { return typeof value === 'string' ? value.
 function parseCookies(request) { return Object.fromEntries((request.headers.cookie || '').split(';').map((part) => { const index = part.indexOf('='); return index < 0 ? [] : [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1))]; }).filter((part) => part.length)); }
 function sessionHash(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 function secureEquals(left, right) { const leftBuffer = Buffer.from(left || ''), rightBuffer = Buffer.from(right || ''); return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer); }
-async function isAdmin(request) {
+async function getSession(request) {
   const token = parseCookies(request).admin_session;
-  if (!token || !pool) return false;
-  const result = await pool.query('SELECT token_hash FROM admin_sessions WHERE token_hash = $1 AND expires_at > NOW()', [sessionHash(token)]);
-  return Boolean(result.rowCount);
+  if (!token || !pool) return null;
+  const result = await pool.query("SELECT COALESCE(role, 'admin') AS role FROM admin_sessions WHERE token_hash = $1 AND expires_at > NOW()", [sessionHash(token)]);
+  return result.rows[0] || null;
 }
-async function requireAdmin(request, response) { if (await isAdmin(request)) return true; sendJson(response, 401, { error: 'Inicia sesión para acceder a los registros.' }); return false; }
+async function isAdmin(request) { return (await getSession(request))?.role === 'admin'; }
+async function requireStaff(request, response) {
+  const session = await getSession(request);
+  if (session) return session;
+  sendJson(response, 401, { error: 'Inicia sesión para acceder a los registros.' });
+  return null;
+}
+async function requireAdmin(request, response) { if (await isAdmin(request)) return true; sendJson(response, 403, { error: 'Esta acción requiere acceso de administradora.' }); return false; }
 function databaseUnavailable(response) { sendJson(response, 503, { error: 'La base de datos aún no está disponible.' }); }
 function sendHtml(response, status, html) { response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); response.end(html); }
 function motiveConfigured() { return Boolean(process.env.MOTIVE_CLIENT_ID && process.env.MOTIVE_CLIENT_SECRET && process.env.MOTIVE_REDIRECT_URI && process.env.MOTIVE_TOKEN_ENCRYPTION_KEY); }
@@ -298,16 +306,23 @@ async function syncMotiveDrivers(accessToken) {
 async function handleApi(request, response, url) {
   if (url.pathname === '/api/health' && request.method === 'GET') { sendJson(response, databaseReady ? 200 : 503, { database: databaseReady }); return true; }
   if (!databaseReady) { databaseUnavailable(response); return true; }
-  if (url.pathname === '/api/auth/status' && request.method === 'GET') { sendJson(response, 200, { authenticated: await isAdmin(request) }); return true; }
+  if (url.pathname === '/api/auth/status' && request.method === 'GET') {
+    const session = await getSession(request);
+    sendJson(response, 200, { authenticated: Boolean(session), role: session?.role || null });
+    return true;
+  }
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
     if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) { sendJson(response, 503, { error: 'Falta configurar ADMIN_EMAIL y ADMIN_PASSWORD en Railway.' }); return true; }
     const body = await readJson(request), email = cleanText(body.email, 160).toLowerCase(), password = typeof body.password === 'string' ? body.password : '';
-    if (!secureEquals(email, process.env.ADMIN_EMAIL.toLowerCase()) || !secureEquals(password, process.env.ADMIN_PASSWORD)) { sendJson(response, 401, { error: 'Correo o contraseña incorrectos.' }); return true; }
+    let role = null;
+    if (secureEquals(email, process.env.ADMIN_EMAIL.toLowerCase()) && secureEquals(password, process.env.ADMIN_PASSWORD)) role = 'admin';
+    else if (process.env.OPERATIONS_EMAIL && process.env.OPERATIONS_PASSWORD && secureEquals(email, process.env.OPERATIONS_EMAIL.toLowerCase()) && secureEquals(password, process.env.OPERATIONS_PASSWORD)) role = 'operator';
+    if (!role) { sendJson(response, 401, { error: 'Correo o contraseña incorrectos.' }); return true; }
     const token = crypto.randomBytes(32).toString('base64url');
     await pool.query('DELETE FROM admin_sessions WHERE expires_at < NOW()');
-    await pool.query('INSERT INTO admin_sessions (token_hash, expires_at) VALUES ($1, NOW() + INTERVAL \'12 hours\')', [sessionHash(token)]);
+    await pool.query('INSERT INTO admin_sessions (token_hash, role, expires_at) VALUES ($1, $2, NOW() + INTERVAL \'12 hours\')', [sessionHash(token), role]);
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Set-Cookie': `admin_session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=43200` });
-    response.end(JSON.stringify({ authenticated: true })); return true;
+    response.end(JSON.stringify({ authenticated: true, role })); return true;
   }
   if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
     const token = parseCookies(request).admin_session;
@@ -364,8 +379,11 @@ async function handleApi(request, response, url) {
     sendJson(response, 201, await uploadEvidenceToCloudinary(body.imageData, body.kind)); return true;
   }
   if (url.pathname === '/api/records' && request.method === 'GET') {
-    if (!await requireAdmin(request, response)) return true;
-    const result = await pool.query('SELECT id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", motive_assignment_status AS "motiveAssignmentStatus", motive_assignment_message AS "motiveAssignmentMessage", motive_assignment_updated_at AS "motiveAssignmentUpdatedAt" FROM fuel_records ORDER BY created_at ASC');
+    const session = await requireStaff(request, response);
+    if (!session) return true;
+    const columns = 'id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl"';
+    const motiveColumns = session.role === 'admin' ? ', motive_assignment_status AS "motiveAssignmentStatus", motive_assignment_message AS "motiveAssignmentMessage", motive_assignment_updated_at AS "motiveAssignmentUpdatedAt"' : '';
+    const result = await pool.query(`SELECT ${columns}${motiveColumns} FROM fuel_records ORDER BY created_at ASC`);
     sendJson(response, 200, result.rows); return true;
   }
   if (url.pathname === '/api/records' && request.method === 'POST') {
@@ -390,7 +408,8 @@ async function handleApi(request, response, url) {
     if (!savedRecord) return true;
     const assignment = await synchronizeMotivePermanentDriver(unit, driver);
     const assignmentResult = await pool.query('UPDATE fuel_records SET motive_assignment_status = $1, motive_assignment_message = $2, motive_assignment_updated_at = NOW() WHERE id = $3 RETURNING motive_assignment_status AS "motiveAssignmentStatus", motive_assignment_message AS "motiveAssignmentMessage", motive_assignment_updated_at AS "motiveAssignmentUpdatedAt"', [assignment.status, assignment.message, savedRecord.id]);
-    sendJson(response, 201, { ...savedRecord, ...assignmentResult.rows[0] });
+    const isOwner = await isAdmin(request);
+    sendJson(response, 201, isOwner ? { ...savedRecord, ...assignmentResult.rows[0] } : savedRecord);
     return true;
   }
   return false;

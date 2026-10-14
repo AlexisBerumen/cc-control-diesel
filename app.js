@@ -17,6 +17,7 @@ let selectedUnit = null;
 let selectedDriver = null;
 let toastTimer;
 let isAdmin = false;
+let userRole = null;
 let activeRecordsRange = { from: '', to: '' };
 let displayedRecords = [];
 
@@ -79,6 +80,7 @@ renderRecords = function renderRecordsWithMotiveStatus() {
   records = displayedRecords;
   renderRecordsBase();
   records = allRecords;
+  if (userRole !== 'admin') { updateRecordsFilterSummary(); return; }
   [...$('#records-body').querySelectorAll('tr')].forEach((row, index) => {
     const record = [...displayedRecords].reverse()[index];
     if (!record || !row.lastElementChild) return;
@@ -235,7 +237,7 @@ $('#confirm-button').addEventListener('click', async e => {
   }
   confirmButton.disabled = false;
   if (isAdmin) { records.push(saved); renderRecords(); }
-  $('#confirm-dialog').close(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada. ${motiveAssignmentLabel(saved)}`); location.hash = '#registro';
+  $('#confirm-dialog').close(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada.${userRole === 'admin' ? ` ${motiveAssignmentLabel(saved)}` : ''}`); location.hash = '#registro';
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
 $('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
@@ -315,11 +317,12 @@ $('#unit-form').addEventListener('submit', async (event) => {
   } catch (error) { showToast(error.message || 'No se pudo conectar a la base de datos.'); }
 }, { capture: true });
 
-function setAdminInterface(authenticated) {
+function setAdminInterface(authenticated, role = null) {
   isAdmin = authenticated;
+  userRole = authenticated ? role : null;
   $('#registros').hidden = !authenticated;
   $('#unidades').hidden = !authenticated;
-  $('#unit-form').hidden = !authenticated;
+  $('#unit-form').hidden = role !== 'admin';
   $('#units-link').hidden = !authenticated;
   $('#login-button').hidden = authenticated;
   $('#logout-button').hidden = !authenticated;
@@ -328,7 +331,7 @@ async function updateSession() {
   try {
     const response = await fetch('/api/auth/status');
     const data = await response.json();
-    setAdminInterface(Boolean(data.authenticated));
+    setAdminInterface(Boolean(data.authenticated), data.role);
   } catch { setAdminInterface(false); }
   return isAdmin;
 }
