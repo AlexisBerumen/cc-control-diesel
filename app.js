@@ -21,6 +21,7 @@ let userRole = null;
 let activeRecordsRange = { from: '', to: '' };
 let displayedRecords = [];
 const maxOdometerJump = 10_000;
+const odometerWarningJump = 2_000;
 
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
@@ -87,8 +88,16 @@ renderRecords = function renderRecordsWithMotiveStatus() {
   records = displayedRecords;
   renderRecordsBase();
   records = allRecords;
+  const renderedRows = [...$('#records-body').querySelectorAll('tr')];
+  renderedRows.forEach((row, index) => {
+    const record = [...displayedRecords].reverse()[index];
+    if (!record || !record.odometerWarning) return;
+    const difference = Number(record.odometerDifference || 0);
+    row.classList.add('odometer-warning-row');
+    if (row.children[3]) row.children[3].innerHTML = `${number(record.odometer)} mi<br><small class="odometer-warning-badge">⚠ Revisar: +${number(difference)} mi vs. referencia</small>`;
+  });
   if (userRole !== 'admin') { updateRecordsFilterSummary(); return; }
-  [...$('#records-body').querySelectorAll('tr')].forEach((row, index) => {
+  renderedRows.forEach((row, index) => {
     const record = [...displayedRecords].reverse()[index];
     if (!record || !row.lastElementChild) return;
     row.lastElementChild.innerHTML = `<span class="status">Completo</span><br><small title="${esc(record.motiveAssignmentMessage || '')}">${esc(motiveAssignmentLabel(record))}</small>`;
@@ -136,6 +145,7 @@ function setUnit(unit) {
   $('#selected-unit').hidden = false;
   $('#selected-unit').innerHTML = `<span>✓</span><div><strong>Unidad ${esc(unit.number)} seleccionada</strong><br><small>${esc(unit.plates)} · ${esc(unit.description)}</small></div>`;
   $('#odometer-note').textContent = last ? `Odómetro de referencia (Motive o carga previa): ${number(last)} millas.` : 'Aún no hay kilometraje previo para esta unidad.';
+  if ($('#odometer').value) validateOdometer(true);
   updateReview();
 }
 function updateSuggestions() {
@@ -164,6 +174,15 @@ function updateDriverSuggestions() {
   panel.hidden = false;
 }
 function setError(id, message) { $(id).textContent = message; }
+function odometerCaution() {
+  const odometer = odometerValue();
+  const previous = selectedUnit && lastOdometer(selectedUnit.id);
+  if (!previous || odometer <= previous + odometerWarningJump || odometer > previous + maxOdometerJump) return null;
+  return { previous, difference: odometer - previous };
+}
+function odometerCautionText(caution = odometerCaution()) {
+  return caution ? `⚠ Revisión recomendada: está ${number(caution.difference)} millas arriba de la referencia (${number(caution.previous)} mi). Confirma que el número sea correcto.` : '';
+}
 function validateOdometer(show = true) {
   const odometer = odometerValue();
   const previous = selectedUnit && lastOdometer(selectedUnit.id);
@@ -171,8 +190,11 @@ function validateOdometer(show = true) {
   if (!odometer) message = 'Indica el kilometraje actual.';
   else if (previous && odometer < previous) message = `No puede ser menor al último registro (${number(previous)} millas).`;
   else if (previous && odometer > previous + maxOdometerJump) message = `El odómetro excede por más de ${number(maxOdometerJump)} millas la referencia (${number(previous)} mi). Verifica que no haya un cero de más.`;
+  const caution = message ? null : odometerCaution();
   if (show) setError('#odometer-error', message);
+  $('#odometer-warning').textContent = caution ? odometerCautionText(caution) : '';
   $('#odometer').classList.toggle('input-invalid', Boolean(message));
+  $('#odometer').classList.toggle('input-warning', Boolean(caution));
   return !message;
 }
 function validate(show = true) {
@@ -201,7 +223,7 @@ function updateReview() {
   const gallons = Number($('#gallons').value), amountValue = $('#amount').value.trim(), amount = amountValue ? Number(amountValue) : null, odo = odometerValue(), driverName = selectedDriver?.name || '';
   const data = [
     ['Unidad', selectedUnit ? `${selectedUnit.number} · ${selectedUnit.plates}` : '—'], ['Chofer', driverName || '—'],
-    ['Odómetro', odo ? `${number(odo)} mi` : '—'], ['Galones', gallons ? `${number(gallons)} gal` : '—'],
+    ['Odómetro', odo ? `${number(odo)} mi${odometerCaution() ? ' ⚠' : ''}` : '—'], ['Galones', gallons ? `${number(gallons)} gal` : '—'],
     ['Importe', amount ? money(amount) : 'Bomba C&C / no aplica'], ['Precio por galón', gallons && amount ? money(amount / gallons) : 'No aplica'],
     ['Evidencias', $('#ticket-photo').files.length && $('#odometer-photo').files.length ? '2 de 2 adjuntas ✓' : `${$('#ticket-photo').files.length + $('#odometer-photo').files.length} de 2 adjuntas`]
   ];
@@ -213,7 +235,8 @@ function updateReview() {
 function showToast(message) { const toast = $('#toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 3800); }
 function resetFuelForm() {
   $('#fuel-form').reset(); selectedUnit = null; selectedDriver = null; $('#selected-unit').hidden = true; $('#selected-driver').hidden = true; $('#unit-options').hidden = true; $('#driver-options').hidden = true; $('#odometer-note').textContent = 'Selecciona una unidad para validar el kilometraje.';
-  $('#odometer').classList.remove('input-invalid');
+  $('#odometer-warning').textContent = '';
+  $('#odometer').classList.remove('input-invalid', 'input-warning');
   document.querySelectorAll('.upload-box').forEach(el => { el.classList.remove('has-file'); el.querySelector('.file-name').textContent = 'Tomar o seleccionar foto'; });
   document.querySelectorAll('.error').forEach(el => el.textContent = ''); updateReview();
 }
@@ -222,7 +245,7 @@ $('#unit-search').addEventListener('input', () => {
   const typed = $('#unit-search').value.trim();
   const exact = units.find(u => u.number.toLowerCase() === typed.toLowerCase());
   if (exact) { setUnit(exact); return; }
-  selectedUnit = null; $('#selected-unit').hidden = true; setError('#unit-error', ''); updateSuggestions(); updateReview();
+  selectedUnit = null; $('#selected-unit').hidden = true; $('#odometer-warning').textContent = ''; $('#odometer').classList.remove('input-warning'); setError('#unit-error', ''); updateSuggestions(); updateReview();
 });
 $('#unit-options').addEventListener('click', e => { const button = e.target.closest('[data-id]'); if (button) setUnit(units.find(u => u.id === button.dataset.id)); });
 $('#driver-search').addEventListener('input', () => {
@@ -241,7 +264,9 @@ Object.entries(evidenceBoxes).forEach(([inputId, boxSelector]) => $(`#${inputId}
 $('#fuel-form').addEventListener('submit', e => {
   e.preventDefault(); if (!validate()) { showToast('Revisa los campos marcados antes de continuar.'); return; }
   const amountValue = $('#amount').value.trim();
-  const values = [['Unidad', `${selectedUnit.number} · ${selectedUnit.plates}`], ['Chofer', selectedDriver.name], ['Odómetro', `${number($('#odometer').value)} mi`], ['Galones', `${number($('#gallons').value)} gal`], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica'], ['Estación', $('#station').value.trim()]];
+  const caution = odometerCaution();
+  const values = [['Unidad', `${selectedUnit.number} · ${selectedUnit.plates}`], ['Chofer', selectedDriver.name], ['Odómetro', `${number(odometerValue())} mi`], ['Galones', `${number($('#gallons').value)} gal`], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica'], ['Estación', $('#station').value.trim()]];
+  if (caution) values.splice(3, 0, ['Alerta', `Revisar: +${number(caution.difference)} mi vs. referencia`]);
   $('#dialog-summary').innerHTML = values.map(([k,v]) => `<p><span>${k}</span><strong>${esc(v)}</strong></p>`).join(''); $('#confirm-dialog').showModal();
 });
 $('#confirm-button').addEventListener('click', async e => {

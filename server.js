@@ -11,6 +11,7 @@ let databaseReady = false;
 const motiveSyncIntervalMinutes = Math.max(15, Number(process.env.MOTIVE_SYNC_INTERVAL_MINUTES || 60));
 const maxGallonsPerLoad = 300;
 const maxOdometerJump = 10_000;
+const odometerWarningJump = 2_000;
 let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
 // It reads locations/users and can update only the permanent driver of a vehicle.
@@ -71,6 +72,9 @@ async function initializeDatabase() {
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_corrected_from INTEGER;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_corrected_at TIMESTAMPTZ;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_correction_reason TEXT;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_warning BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_reference INTEGER;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_difference INTEGER;
     UPDATE fuel_records SET driver_name = 'No registrado' WHERE driver_name IS NULL;
     ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
@@ -391,13 +395,13 @@ async function handleApi(request, response, url) {
     if (!recordResult.rowCount) { sendJson(response, 404, { error: 'No se encontró la carga solicitada.' }); return true; }
     const record = recordResult.rows[0], motiveOdometer = Math.floor(Number(record.motive_odometer));
     if (!Number.isFinite(motiveOdometer) || motiveOdometer <= 0) { sendJson(response, 422, { error: 'Motive no tiene una lectura de odómetro disponible para esta unidad.' }); return true; }
-    const corrected = await pool.query("UPDATE fuel_records SET odometer_corrected_from = COALESCE(odometer_corrected_from, odometer), odometer = $1, odometer_corrected_at = NOW(), odometer_correction_reason = 'Restablecido desde la lectura actual de Motive por administradora.' WHERE id = $2 RETURNING id, odometer, odometer_corrected_from AS \"odometerCorrectedFrom\"", [motiveOdometer, record.id]);
+    const corrected = await pool.query("UPDATE fuel_records SET odometer_corrected_from = COALESCE(odometer_corrected_from, odometer), odometer = $1, odometer_warning = FALSE, odometer_reference = $1, odometer_difference = 0, odometer_corrected_at = NOW(), odometer_correction_reason = 'Restablecido desde la lectura actual de Motive por administradora.' WHERE id = $2 RETURNING id, odometer, odometer_corrected_from AS \"odometerCorrectedFrom\"", [motiveOdometer, record.id]);
     sendJson(response, 200, corrected.rows[0]); return true;
   }
   if (url.pathname === '/api/records' && request.method === 'GET') {
     const session = await requireStaff(request, response);
     if (!session) return true;
-    const columns = 'id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl"';
+    const columns = 'id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", odometer_warning AS "odometerWarning", odometer_reference AS "odometerReference", odometer_difference AS "odometerDifference"';
     const motiveColumns = session.role === 'admin' ? ', motive_assignment_status AS "motiveAssignmentStatus", motive_assignment_message AS "motiveAssignmentMessage", motive_assignment_updated_at AS "motiveAssignmentUpdatedAt"' : '';
     const result = await pool.query(`SELECT ${columns}${motiveColumns} FROM fuel_records ORDER BY created_at ASC`);
     sendJson(response, 200, result.rows); return true;
@@ -411,17 +415,19 @@ async function handleApi(request, response, url) {
     if (!unitResult.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada no existe.' }); return true; }
     const unit = unitResult.rows[0];
     const previousResult = await pool.query('SELECT MAX(odometer) AS odometer FROM fuel_records WHERE unit_id = $1', [unit.id]);
-    const odometerReference = Math.max(Number(unit.motive_odometer || 0), Number(previousResult.rows[0].odometer || 0));
+    const odometerReference = Math.floor(Math.max(Number(unit.motive_odometer || 0), Number(previousResult.rows[0].odometer || 0)));
     if (odometerReference && odometer > odometerReference + maxOdometerJump) { sendJson(response, 400, { error: `El odómetro excede por más de ${maxOdometerJump.toLocaleString('en-US')} millas la referencia de ${odometerReference.toLocaleString('en-US')} millas. Verifica que no haya un cero de más.` }); return true; }
+    const odometerDifference = odometerReference ? odometer - odometerReference : 0;
+    const odometerWarning = odometerDifference > odometerWarningJump;
     const driverResult = await pool.query('SELECT id, name, motive_driver_id FROM drivers WHERE id = $1 AND active = TRUE', [driverId]);
     if (!driverResult.rowCount) { sendJson(response, 400, { error: 'Selecciona un chofer válido de la lista.' }); return true; }
     const driver = driverResult.rows[0], client = await pool.connect();
     let savedRecord;
     try {
       await client.query('BEGIN');
-      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file, ticket_url, odometer_url, motive_assignment_status, motive_assignment_message) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, ticketFile, odometerFile, ticketUrl, odometerUrl, 'processing', 'Validando asignacion con Motive...']);
+      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file, ticket_url, odometer_url, motive_assignment_status, motive_assignment_message, odometer_warning, odometer_reference, odometer_difference) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, ticketFile, odometerFile, ticketUrl, odometerUrl, 'processing', 'Validando asignacion con Motive...', odometerWarning, odometerReference || null, odometerDifference || null]);
       const row = inserted.rows[0], folio = `DC-${new Date(row.created_at).getFullYear()}-${String(row.record_id).padStart(5, '0')}`;
-      const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl"', [folio, row.record_id]);
+      const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", odometer_warning AS "odometerWarning", odometer_reference AS "odometerReference", odometer_difference AS "odometerDifference"', [folio, row.record_id]);
       await client.query('COMMIT'); savedRecord = saved.rows[0];
     } catch (error) { await client.query('ROLLBACK'); if (error.code === '23505') sendJson(response, 409, { error: 'Esta carga ya fue registrada.' }); else throw error; }
     finally { client.release(); }
