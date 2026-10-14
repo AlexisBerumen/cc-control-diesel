@@ -35,6 +35,11 @@ input { border-color: #cbd4e7; border-radius: 10px; }
 input:focus { border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12); }
 .suggestions { border-color: #cbd4e7; box-shadow: 0 12px 28px rgba(16, 29, 82, .16); }
 .suggestion:hover { background: #f4f6ff; }
+.support-suggestion { cursor: default; background: #fff9ea; }
+.support-suggestion:hover { background: #fff4d5; }
+.support-suggestion small { display: block; line-height: 1.35; }
+.support-whatsapp { display: inline-flex; margin-top: 9px; padding: 7px 10px; border-radius: 7px; background: #1f9d5c; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
+.support-whatsapp:hover { background: #168349; }
 .divider { border-color: #e2e7f2; }
 .unit-confirmation { border-color: #bde4cc; }
 .upload-box { border-color: #b9c7e2; background: #f9faff; border-radius: 13px; }

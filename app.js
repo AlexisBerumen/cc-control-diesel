@@ -150,12 +150,21 @@ function setUnit(unit) {
   if ($('#odometer').value) validateOdometer(true);
   updateReview();
 }
+function supportSuggestion(kind) {
+  const message = kind === 'chofer'
+    ? 'No encontramos ese chofer. Contacta a soporte para registrarlo o sincronizarlo con Motive antes de continuar.'
+    : 'No encontramos esa unidad. Contacta a soporte para darla de alta antes de continuar.';
+  const whatsappText = kind === 'chofer'
+    ? 'Hola, necesito apoyo para registrar una carga de diésel. El chofer que busco no aparece en la lista.'
+    : 'Hola, necesito apoyo para registrar una carga de diésel. La unidad que busco no aparece en la lista.';
+  return `<div class="suggestion support-suggestion"><strong>¿No aparece el ${kind}?</strong><small>${message}</small><a class="support-whatsapp" href="https://wa.me/526183249678?text=${encodeURIComponent(whatsappText)}" target="_blank" rel="noopener">Contactar por WhatsApp</a></div>`;
+}
 function updateSuggestions() {
   const query = $('#unit-search').value.trim().toLowerCase();
   if (!query) { $('#unit-options').hidden = true; return; }
   const matches = units.filter(u => u.number.toLowerCase().includes(query)).slice(0, 6);
   const panel = $('#unit-options');
-  panel.innerHTML = matches.length ? matches.map(u => `<button class="suggestion" type="button" data-id="${u.id}" role="option"><strong>Unidad ${esc(u.number)}</strong><small>${esc(unitDescription(u))}</small></button>`).join('') : '<div class="suggestion"><strong>Sin coincidencias</strong><small>Esta unidad no está registrada.</small></div>';
+  panel.innerHTML = matches.length ? matches.map(u => `<button class="suggestion" type="button" data-id="${u.id}" role="option"><strong>Unidad ${esc(u.number)}</strong><small>${esc(unitDescription(u))}</small></button>`).join('') : supportSuggestion('unidad');
   panel.hidden = false;
 }
 function setDriver(driver) {
@@ -172,7 +181,7 @@ function updateDriverSuggestions() {
   if (!query) { $('#driver-options').hidden = true; return; }
   const matches = drivers.filter(driver => driver.name.toLowerCase().includes(query)).slice(0, 8);
   const panel = $('#driver-options');
-  panel.innerHTML = matches.length ? matches.map(driver => `<button class="suggestion" type="button" data-driver-id="${esc(driver.id)}" role="option"><strong>${esc(driver.name)}</strong><small>Chofer registrado en Motive</small></button>`).join('') : '<div class="suggestion"><strong>Sin coincidencias</strong><small>Selecciona un chofer registrado en Motive.</small></div>';
+  panel.innerHTML = matches.length ? matches.map(driver => `<button class="suggestion" type="button" data-driver-id="${esc(driver.id)}" role="option"><strong>${esc(driver.name)}</strong><small>Chofer registrado en Motive</small></button>`).join('') : supportSuggestion('chofer');
   panel.hidden = false;
 }
 function setError(id, message) { $(id).textContent = message; }
