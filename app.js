@@ -20,9 +20,11 @@ let isAdmin = false;
 let userRole = null;
 let activeRecordsRange = { from: '', to: '' };
 let recordsPagination = { page: 1, limit: 20, total: 0, totalPages: 1 };
+let unitCatalogPage = 1;
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
 const recordsPageSize = 20;
+const unitCatalogPageSize = 24;
 
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
@@ -51,8 +53,19 @@ function lastOdometer(unitId) {
 function unitDescription(unit) { return unit?.description || 'Sin descripción'; }
 function recordUnitDescription(record) { return unitDescription(units.find((unit) => unit.id === record.unitId)); }
 function renderUnitCatalog() {
-  $('#unit-catalog').innerHTML = units.length ? units.map(u => `<div class="catalog-unit"><strong>Unidad ${esc(u.number)}</strong><small>${esc(unitDescription(u))}</small></div>`).join('') : '<p class="muted">No hay unidades registradas.</p>';
+  const totalPages = Math.max(1, Math.ceil(units.length / unitCatalogPageSize));
+  unitCatalogPage = Math.min(Math.max(1, unitCatalogPage), totalPages);
+  const first = (unitCatalogPage - 1) * unitCatalogPageSize;
+  const visibleUnits = units.slice(first, first + unitCatalogPageSize);
+  $('#unit-catalog').innerHTML = units.length ? visibleUnits.map(u => `<div class="catalog-unit"><strong>Unidad ${esc(u.number)}</strong><small>${esc(unitDescription(u))}</small></div>`).join('') : '<p class="muted">No hay unidades registradas.</p>';
+  const controls = $('#unit-catalog-pagination');
+  controls.hidden = units.length <= unitCatalogPageSize;
+  $('#unit-catalog-previous-page').disabled = unitCatalogPage <= 1;
+  $('#unit-catalog-next-page').disabled = unitCatalogPage >= totalPages;
+  $('#unit-catalog-page-summary').textContent = units.length ? `Mostrando ${first + 1}–${Math.min(first + visibleUnits.length, units.length)} de ${units.length} unidades · Página ${unitCatalogPage} de ${totalPages}` : '';
 }
+$('#unit-catalog-previous-page').addEventListener('click', () => { unitCatalogPage = Math.max(1, unitCatalogPage - 1); renderUnitCatalog(); });
+$('#unit-catalog-next-page').addEventListener('click', () => { unitCatalogPage += 1; renderUnitCatalog(); });
 function motiveAssignmentLabel(record) {
   const labels = {
     already_assigned: 'Motive: ya asignado',
@@ -455,7 +468,7 @@ $('#unit-form').addEventListener('submit', async (event) => {
     const response = await fetch('/api/units', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number, plates, description }) });
     const saved = await response.json();
     if (!response.ok) throw new Error(saved.error || 'No fue posible agregar la unidad.');
-    units.push(saved); save(STORAGE.units, units); event.currentTarget.reset(); renderUnitCatalog(); showToast(`Unidad ${number} agregada al catálogo.`);
+    units.push(saved); save(STORAGE.units, units); unitCatalogPage = Math.ceil(units.length / unitCatalogPageSize); event.currentTarget.reset(); renderUnitCatalog(); showToast(`Unidad ${number} agregada al catálogo.`);
   } catch (error) { showToast(error.message || 'No se pudo conectar a la base de datos.'); }
 });
 
