@@ -55,6 +55,8 @@ input:focus { border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12
 .dialog-odometer-warning p { margin: 7px 0 12px; font-size: 13px; line-height: 1.4; }
 .warning-confirm { display: flex; align-items: flex-start; gap: 9px; margin: 0; color: #5f4100; font-size: 13px; font-weight: 700; line-height: 1.35; cursor: pointer; }
 .warning-confirm input { width: 20px; height: 20px; flex: 0 0 20px; margin: 0; accent-color: #b87a00; }
+.dialog-actions .primary-button:disabled { border-color: #aeb7c5; background: #aeb7c5; color: #edf1f5; box-shadow: none; cursor: not-allowed; transform: none; }
+.dialog-actions .primary-button:disabled:hover { border-color: #aeb7c5; background: #aeb7c5; transform: none; }
 .divider { border-color: #e2e7f2; }
 .unit-confirmation { border-color: #bde4cc; }
 .upload-box { border-color: #b9c7e2; background: #f9faff; border-radius: 13px; }
