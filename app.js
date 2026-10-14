@@ -192,7 +192,7 @@ function odometerCaution() {
   return { previous, difference: odometer - previous };
 }
 function odometerCautionText(caution = odometerCaution()) {
-  return caution ? `⚠ Revisión recomendada: está ${number(caution.difference)} millas arriba de la referencia (${number(caution.previous)} mi). Confirma que el número sea correcto.` : '';
+  return caution ? `⚠ Atención: está ${number(caution.difference)} millas arriba de la referencia (${number(caution.previous)} mi). Si ya revisaste el odómetro y el número es correcto, puedes continuar; se te pedirá confirmarlo antes de guardar.` : '';
 }
 function validateOdometer(show = true) {
   const odometer = odometerValue();
