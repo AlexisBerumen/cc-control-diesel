@@ -44,6 +44,14 @@ input:focus { border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12
 .primary-button:hover { background: linear-gradient(120deg, #c91e31, #ae1425); border-color: #ae1425; transform: translateY(-1px); }
 .secondary-button { border-color: #bcc7df; border-radius: 10px; color: #1b3277; }
 .secondary-button:hover { background: #f0f3ff; border-color: #8799c5; }
+.record-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.record-filters { display: grid; grid-template-columns: minmax(145px, 190px) minmax(145px, 190px) auto 1fr; gap: 10px; align-items: end; margin: 0 0 20px; padding: 14px; border: 1px solid #d7def0; border-radius: 10px; background: #f7f9ff; }
+.record-filters label { margin: 0; color: #1b3277; }
+.record-filters input { margin-top: 5px; padding: 9px 10px; }
+.record-filters .field-help { grid-column: 1 / -1; margin: 0; }
+.filter-link { border: 0; background: transparent; color: #1b3277; font: 700 13px "DM Sans", sans-serif; padding: 10px 4px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+@media(max-width: 700px) { .records-heading { align-items: flex-start; gap: 14px; flex-direction: column; } .record-filters { grid-template-columns: 1fr 1fr; } .record-filters .secondary-button { width: 100%; } .filter-link { text-align: left; } }
+@media(max-width: 460px) { .record-filters { grid-template-columns: 1fr; } .record-actions { width: 100%; } .record-actions .secondary-button { flex: 1; } }
 .review-card { background: linear-gradient(155deg, #172f7e, #101d52); border: 0; box-shadow: 0 18px 42px rgba(16, 29, 82, .27); }
 .review-card h2 { color: #fff; }
 .review-card .muted, .review-card .review-list dt { color: #d3dcf8; }

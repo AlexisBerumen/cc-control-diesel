@@ -17,6 +17,8 @@ let selectedUnit = null;
 let selectedDriver = null;
 let toastTimer;
 let isAdmin = false;
+let activeRecordsRange = { from: '', to: '' };
+let displayedRecords = [];
 
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
@@ -53,15 +55,53 @@ function renderRecords() {
   if (!records.length) { body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr>'; return; }
   body.innerHTML = [...records].reverse().map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(r.plates)}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
 }
+function filteredRecords() {
+  const from = activeRecordsRange.from ? new Date(`${activeRecordsRange.from}T00:00:00`).getTime() : -Infinity;
+  const to = activeRecordsRange.to ? new Date(`${activeRecordsRange.to}T23:59:59.999`).getTime() : Infinity;
+  return records.filter((record) => {
+    const time = new Date(record.createdAt).getTime();
+    return Number.isFinite(time) && time >= from && time <= to;
+  });
+}
+function updateRecordsFilterSummary() {
+  const summary = $('#records-filter-summary');
+  if (!activeRecordsRange.from && !activeRecordsRange.to) {
+    summary.textContent = `Mostrando ${displayedRecords.length} carga(s), de la más reciente hacia atrás.`;
+    return;
+  }
+  const range = [activeRecordsRange.from && `desde ${activeRecordsRange.from}`, activeRecordsRange.to && `hasta ${activeRecordsRange.to}`].filter(Boolean).join(' ');
+  summary.textContent = `Mostrando ${displayedRecords.length} carga(s) ${range}.`;
+}
 const renderRecordsBase = renderRecords;
 renderRecords = function renderRecordsWithMotiveStatus() {
+  displayedRecords = filteredRecords();
+  const allRecords = records;
+  records = displayedRecords;
   renderRecordsBase();
+  records = allRecords;
   [...$('#records-body').querySelectorAll('tr')].forEach((row, index) => {
-    const record = [...records].reverse()[index];
+    const record = [...displayedRecords].reverse()[index];
     if (!record || !row.lastElementChild) return;
     row.lastElementChild.innerHTML = `<span class="status">Completo</span><br><small title="${esc(record.motiveAssignmentMessage || '')}">${esc(motiveAssignmentLabel(record))}</small>`;
   });
+  updateRecordsFilterSummary();
 };
+function applyRecordsFilter() {
+  const from = $('#records-date-from').value;
+  const to = $('#records-date-to').value;
+  if (from && to && from > to) { showToast('La fecha inicial no puede ser posterior a la fecha final.'); return; }
+  activeRecordsRange = { from, to };
+  renderRecords();
+}
+$('#apply-records-filter').addEventListener('click', applyRecordsFilter);
+$('#records-date-from').addEventListener('change', () => { if (!$('#records-date-to').value || $('#records-date-from').value <= $('#records-date-to').value) applyRecordsFilter(); });
+$('#records-date-to').addEventListener('change', () => { if (!$('#records-date-from').value || $('#records-date-from').value <= $('#records-date-to').value) applyRecordsFilter(); });
+$('#clear-records-filter').addEventListener('click', () => {
+  $('#records-date-from').value = '';
+  $('#records-date-to').value = '';
+  activeRecordsRange = { from: '', to: '' };
+  renderRecords();
+});
 function setUnit(unit) {
   selectedUnit = unit;
   $('#unit-search').value = unit.number;
@@ -199,6 +239,65 @@ $('#confirm-button').addEventListener('click', async e => {
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
 $('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });
+
+function exportRows() {
+  const headings = ['Folio', 'Fecha', 'Unidad', 'Chofer', 'Identificador', 'Odómetro (millas)', 'Galones', 'Importe (MXN)', 'Estación', 'Estado Motive', 'Detalle Motive', 'URL ticket', 'URL odómetro'];
+  const rows = [...displayedRecords].reverse().map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.plates, record.odometer, record.gallons, record.amount ?? '', record.station, motiveAssignmentLabel(record), record.motiveAssignmentMessage || '', record.ticketUrl || '', record.odometerUrl || '']);
+  return [headings, ...rows];
+}
+function downloadFile(blob, name) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1_000);
+}
+function exportCsv() {
+  if (!displayedRecords.length) { showToast('No hay cargas en el rango seleccionado.'); return; }
+  const csv = exportRows().map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n');
+  downloadFile(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }), `cargas-diesel-${new Date().toISOString().slice(0, 10)}.csv`);
+}
+function xmlEscape(value) { return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;'); }
+function spreadsheetValue(value) { const text = String(value ?? ''); return /^[=+\-@]/.test(text) ? `'${text}` : text; }
+function spreadsheetColumn(index) { let output = ''; for (let number = index + 1; number; number = Math.floor((number - 1) / 26)) output = String.fromCharCode(65 + (number - 1) % 26) + output; return output; }
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0); }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function xlsxZip(files) {
+  const encoder = new TextEncoder(), parts = [], central = [], offsets = [];
+  let offset = 0;
+  const bytes = (size) => new Uint8Array(size);
+  const write16 = (target, position, value) => new DataView(target.buffer).setUint16(position, value, true);
+  const write32 = (target, position, value) => new DataView(target.buffer).setUint32(position, value >>> 0, true);
+  for (const [name, content] of files) {
+    const nameBytes = encoder.encode(name), contentBytes = encoder.encode(content), crc = crc32(contentBytes), local = bytes(30 + nameBytes.length);
+    write32(local, 0, 0x04034b50); write16(local, 4, 20); write16(local, 8, 0); write32(local, 14, crc); write32(local, 18, contentBytes.length); write32(local, 22, contentBytes.length); write16(local, 26, nameBytes.length); local.set(nameBytes, 30);
+    parts.push(local, contentBytes); offsets.push(offset); offset += local.length + contentBytes.length;
+    const header = bytes(46 + nameBytes.length); write32(header, 0, 0x02014b50); write16(header, 4, 20); write16(header, 6, 20); write16(header, 10, 0); write32(header, 16, crc); write32(header, 20, contentBytes.length); write32(header, 24, contentBytes.length); write16(header, 28, nameBytes.length); write32(header, 42, offsets[offsets.length - 1]); header.set(nameBytes, 46); central.push(header);
+  }
+  const centralSize = central.reduce((total, part) => total + part.length, 0), end = bytes(22);
+  write32(end, 0, 0x06054b50); write16(end, 8, files.length); write16(end, 10, files.length); write32(end, 12, centralSize); write32(end, 16, offset);
+  return new Blob([...parts, ...central, end], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+function exportExcel() {
+  if (!displayedRecords.length) { showToast('No hay cargas en el rango seleccionado.'); return; }
+  const rows = exportRows();
+  const sheetRows = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${spreadsheetColumn(columnIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${xmlEscape(spreadsheetValue(value))}</t></is></c>`).join('')}</row>`).join('');
+  const files = [
+    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'],
+    ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Cargas de diesel" sheetId="1" r:id="rId1"/></sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'],
+    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`]
+  ];
+  downloadFile(xlsxZip(files), `cargas-diesel-${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+const csvButton = $('#export-csv').cloneNode(true);
+$('#export-csv').replaceWith(csvButton);
+csvButton.addEventListener('click', exportCsv);
+$('#export-excel').addEventListener('click', exportExcel);
 
 $('#unit-form').addEventListener('submit', async (event) => {
   event.preventDefault();
