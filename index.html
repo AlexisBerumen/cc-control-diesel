@@ -63,7 +63,7 @@
             </div>
             <div>
               <label for="odometer">Odómetro (millas)</label>
-              <input id="odometer" name="odometer" type="number" min="1" step="1" inputmode="numeric" placeholder="Ej. 154320" required />
+              <input id="odometer" name="odometer" type="text" inputmode="numeric" pattern="[0-9,]*" autocomplete="off" placeholder="Ej. 154,320" required />
               <p id="odometer-note" class="field-help">Selecciona una unidad para validar el kilometraje.</p>
               <p id="odometer-error" class="error" role="alert"></p>
             </div>

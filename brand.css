@@ -66,6 +66,10 @@ th { background: #eef2ff; color: #324a91; }
 .catalog-unit { background: #f7f9ff; border-color: #d9e1f2; }
 .catalog-unit strong { color: #1b3584; }
 .nav-button { color: #dce4ff; }
+.input-invalid { border-color: #c92438 !important; background: #fff2f3 !important; box-shadow: 0 0 0 3px rgba(201, 30, 49, .14) !important; }
+.odometer-reset { margin-top: 8px; border: 1px solid #c91e31; border-radius: 7px; background: #fff5f6; color: #a41528; font: 700 11px "DM Sans", sans-serif; padding: 6px 8px; cursor: pointer; }
+.odometer-reset:hover { background: #ffe8eb; }
+.odometer-reset:disabled { opacity: .55; cursor: wait; }
 
 @media (max-width: 820px) {
   .topbar { min-height: 76px; }

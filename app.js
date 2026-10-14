@@ -20,11 +20,18 @@ let isAdmin = false;
 let userRole = null;
 let activeRecordsRange = { from: '', to: '' };
 let displayedRecords = [];
+const maxOdometerJump = 10_000;
 
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function money(value) { return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(value || 0)); }
 function number(value) { return new Intl.NumberFormat('es-MX', { maximumFractionDigits: 2 }).format(Number(value || 0)); }
+function odometerValue() { return Number($('#odometer').value.replace(/[^0-9]/g, '')); }
+function formatOdometerInput() {
+  const input = $('#odometer');
+  const digits = input.value.replace(/[^0-9]/g, '');
+  input.value = digits ? Number(digits).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '';
+}
 function esc(text) { const d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
 function fileAsDataUrl(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('No fue posible leer la foto.')); reader.readAsDataURL(file); }); }
 async function uploadEvidence(file, kind) {
@@ -85,6 +92,8 @@ renderRecords = function renderRecordsWithMotiveStatus() {
     const record = [...displayedRecords].reverse()[index];
     if (!record || !row.lastElementChild) return;
     row.lastElementChild.innerHTML = `<span class="status">Completo</span><br><small title="${esc(record.motiveAssignmentMessage || '')}">${esc(motiveAssignmentLabel(record))}</small>`;
+    const motiveOdometer = Number(units.find((unit) => unit.id === record.unitId)?.motiveOdometer || 0);
+    if (motiveOdometer && Number(record.odometer) > motiveOdometer + maxOdometerJump) row.lastElementChild.insertAdjacentHTML('beforeend', `<br><button class="odometer-reset" type="button" data-reset-odometer="${esc(record.id)}">Corregir con Motive</button>`);
   });
   updateRecordsFilterSummary();
 };
@@ -103,6 +112,20 @@ $('#clear-records-filter').addEventListener('click', () => {
   $('#records-date-to').value = '';
   activeRecordsRange = { from: '', to: '' };
   renderRecords();
+});
+$('#records-body').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-reset-odometer]');
+  if (!button || userRole !== 'admin') return;
+  if (!confirm('Se reemplazará el odómetro de esta carga con la lectura actual de Motive. El valor original quedará guardado para auditoría. ¿Continuar?')) return;
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/records/${encodeURIComponent(button.dataset.resetOdometer)}/reset-odometer-from-motive`, { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible corregir el odómetro.');
+    showToast(`Odómetro corregido a ${number(data.odometer)} millas desde Motive.`);
+    await synchronizeWithDatabase();
+  } catch (error) { showToast(error.message || 'No fue posible corregir el odómetro.'); }
+  finally { button.disabled = false; }
 });
 function setUnit(unit) {
   selectedUnit = unit;
@@ -141,16 +164,23 @@ function updateDriverSuggestions() {
   panel.hidden = false;
 }
 function setError(id, message) { $(id).textContent = message; }
+function validateOdometer(show = true) {
+  const odometer = odometerValue();
+  const previous = selectedUnit && lastOdometer(selectedUnit.id);
+  let message = '';
+  if (!odometer) message = 'Indica el kilometraje actual.';
+  else if (previous && odometer < previous) message = `No puede ser menor al último registro (${number(previous)} millas).`;
+  else if (previous && odometer > previous + maxOdometerJump) message = `El odómetro excede por más de ${number(maxOdometerJump)} millas la referencia (${number(previous)} mi). Verifica que no haya un cero de más.`;
+  if (show) setError('#odometer-error', message);
+  $('#odometer').classList.toggle('input-invalid', Boolean(message));
+  return !message;
+}
 function validate(show = true) {
   let valid = true;
   const typed = $('#unit-search').value.trim();
   const exact = units.find(u => u.number.toLowerCase() === typed.toLowerCase());
   if (!selectedUnit || selectedUnit.id !== exact?.id) { if (show) setError('#unit-error', 'Selecciona una unidad válida de la lista.'); valid = false; }
-  const odometer = Number($('#odometer').value);
-  const previous = selectedUnit && lastOdometer(selectedUnit.id);
-  if (!odometer) { if (show) setError('#odometer-error', 'Indica el kilometraje actual.'); valid = false; }
-  else if (previous && odometer < previous) { if (show) setError('#odometer-error', `No puede ser menor al último registro (${number(previous)} millas).`); valid = false; }
-  else setError('#odometer-error', '');
+  if (!validateOdometer(show)) valid = false;
   const typedDriver = $('#driver-search').value.trim();
   const exactDriver = drivers.find(driver => driver.name.toLowerCase() === typedDriver.toLowerCase());
   if (!selectedDriver || selectedDriver.id !== exactDriver?.id) { if (show) setError('#driver-error', 'Selecciona un chofer válido de la lista.'); valid = false; } else setError('#driver-error', '');
@@ -168,7 +198,7 @@ function validate(show = true) {
   return valid;
 }
 function updateReview() {
-  const gallons = Number($('#gallons').value), amountValue = $('#amount').value.trim(), amount = amountValue ? Number(amountValue) : null, odo = Number($('#odometer').value), driverName = selectedDriver?.name || '';
+  const gallons = Number($('#gallons').value), amountValue = $('#amount').value.trim(), amount = amountValue ? Number(amountValue) : null, odo = odometerValue(), driverName = selectedDriver?.name || '';
   const data = [
     ['Unidad', selectedUnit ? `${selectedUnit.number} · ${selectedUnit.plates}` : '—'], ['Chofer', driverName || '—'],
     ['Odómetro', odo ? `${number(odo)} mi` : '—'], ['Galones', gallons ? `${number(gallons)} gal` : '—'],
@@ -183,6 +213,7 @@ function updateReview() {
 function showToast(message) { const toast = $('#toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 3800); }
 function resetFuelForm() {
   $('#fuel-form').reset(); selectedUnit = null; selectedDriver = null; $('#selected-unit').hidden = true; $('#selected-driver').hidden = true; $('#unit-options').hidden = true; $('#driver-options').hidden = true; $('#odometer-note').textContent = 'Selecciona una unidad para validar el kilometraje.';
+  $('#odometer').classList.remove('input-invalid');
   document.querySelectorAll('.upload-box').forEach(el => { el.classList.remove('has-file'); el.querySelector('.file-name').textContent = 'Tomar o seleccionar foto'; });
   document.querySelectorAll('.error').forEach(el => el.textContent = ''); updateReview();
 }
@@ -202,7 +233,8 @@ $('#driver-search').addEventListener('input', () => {
 });
 $('#driver-options').addEventListener('click', e => { const button = e.target.closest('[data-driver-id]'); if (button) setDriver(drivers.find(driver => driver.id === button.dataset.driverId)); });
 document.addEventListener('click', e => { if (!e.target.closest('.autocomplete')) { $('#unit-options').hidden = true; $('#driver-options').hidden = true; } });
-['odometer','gallons','amount','station','ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('input', updateReview));
+['gallons','amount','station','ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('input', updateReview));
+$('#odometer').addEventListener('input', () => { formatOdometerInput(); validateOdometer(Boolean(selectedUnit)); updateReview(); });
 const evidenceBoxes = { 'ticket-photo': '#ticket-box', 'odometer-photo': '#odometer-box' };
 Object.entries(evidenceBoxes).forEach(([inputId, boxSelector]) => $(`#${inputId}`).addEventListener('change', e => { const box = $(boxSelector); const name = e.target.files[0]?.name; box.classList.toggle('has-file', Boolean(name)); box.querySelector('.file-name').textContent = name || 'Tomar o seleccionar foto'; updateReview(); }));
 
@@ -225,7 +257,7 @@ $('#confirm-button').addEventListener('click', async e => {
       uploadEvidence($('#ticket-photo').files[0], 'ticket'),
       uploadEvidence($('#odometer-photo').files[0], 'odometer')
     ]);
-    const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, driverId: selectedDriver.id, driverName: selectedDriver.name, odometer: Number($('#odometer').value), gallons: Number($('#gallons').value), amount: amountValue ? Number(amountValue) : null, station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name, ticketUrl: ticketEvidence.url, odometerUrl: odometerEvidence.url };
+    const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, driverId: selectedDriver.id, driverName: selectedDriver.name, odometer: odometerValue(), gallons: Number($('#gallons').value), amount: amountValue ? Number(amountValue) : null, station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name, ticketUrl: ticketEvidence.url, odometerUrl: odometerEvidence.url };
     const response = await fetch('/api/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No fue posible guardar la carga.');

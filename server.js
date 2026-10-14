@@ -10,6 +10,7 @@ const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env
 let databaseReady = false;
 const motiveSyncIntervalMinutes = Math.max(15, Number(process.env.MOTIVE_SYNC_INTERVAL_MINUTES || 60));
 const maxGallonsPerLoad = 300;
+const maxOdometerJump = 10_000;
 let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
 // It reads locations/users and can update only the permanent driver of a vehicle.
@@ -67,6 +68,9 @@ async function initializeDatabase() {
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS motive_assignment_status TEXT;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS motive_assignment_message TEXT;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS motive_assignment_updated_at TIMESTAMPTZ;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_corrected_from INTEGER;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_corrected_at TIMESTAMPTZ;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_correction_reason TEXT;
     UPDATE fuel_records SET driver_name = 'No registrado' WHERE driver_name IS NULL;
     ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
@@ -378,6 +382,18 @@ async function handleApi(request, response, url) {
     const body = await readJson(request, 12_000_000);
     sendJson(response, 201, await uploadEvidenceToCloudinary(body.imageData, body.kind)); return true;
   }
+  const resetOdometerMatch = url.pathname.match(/^\/api\/records\/([^/]+)\/reset-odometer-from-motive$/);
+  if (resetOdometerMatch && request.method === 'POST') {
+    if (!await requireAdmin(request, response)) return true;
+    await syncMotiveVehicles();
+    const recordId = decodeURIComponent(resetOdometerMatch[1]);
+    const recordResult = await pool.query('SELECT fuel_records.id, fuel_records.odometer, units.motive_odometer FROM fuel_records JOIN units ON units.id = fuel_records.unit_id WHERE fuel_records.id = $1', [recordId]);
+    if (!recordResult.rowCount) { sendJson(response, 404, { error: 'No se encontró la carga solicitada.' }); return true; }
+    const record = recordResult.rows[0], motiveOdometer = Math.floor(Number(record.motive_odometer));
+    if (!Number.isFinite(motiveOdometer) || motiveOdometer <= 0) { sendJson(response, 422, { error: 'Motive no tiene una lectura de odómetro disponible para esta unidad.' }); return true; }
+    const corrected = await pool.query("UPDATE fuel_records SET odometer_corrected_from = COALESCE(odometer_corrected_from, odometer), odometer = $1, odometer_corrected_at = NOW(), odometer_correction_reason = 'Restablecido desde la lectura actual de Motive por administradora.' WHERE id = $2 RETURNING id, odometer, odometer_corrected_from AS \"odometerCorrectedFrom\"", [motiveOdometer, record.id]);
+    sendJson(response, 200, corrected.rows[0]); return true;
+  }
   if (url.pathname === '/api/records' && request.method === 'GET') {
     const session = await requireStaff(request, response);
     if (!session) return true;
@@ -391,11 +407,15 @@ async function handleApi(request, response, url) {
     const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), gallons = Number(body.gallons), amount = body.amount === null || body.amount === '' || body.amount === undefined ? null : Number(body.amount);
     const driverId = cleanText(body.driverId, 100), station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180), ticketUrl = cleanText(body.ticketUrl, 1_000), odometerUrl = cleanText(body.odometerUrl, 1_000);
     if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !driverId || !station || !ticketFile || !odometerFile || !isCloudinaryEvidenceUrl(ticketUrl) || !isCloudinaryEvidenceUrl(odometerUrl)) { sendJson(response, 400, { error: `Datos de carga incompletos o no válidos. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
-    const unitResult = await pool.query('SELECT id, number, identifier, motive_vehicle_id FROM units WHERE id = $1', [body.unitId]);
+    const unitResult = await pool.query('SELECT id, number, identifier, motive_vehicle_id, motive_odometer FROM units WHERE id = $1', [body.unitId]);
     if (!unitResult.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada no existe.' }); return true; }
+    const unit = unitResult.rows[0];
+    const previousResult = await pool.query('SELECT MAX(odometer) AS odometer FROM fuel_records WHERE unit_id = $1', [unit.id]);
+    const odometerReference = Math.max(Number(unit.motive_odometer || 0), Number(previousResult.rows[0].odometer || 0));
+    if (odometerReference && odometer > odometerReference + maxOdometerJump) { sendJson(response, 400, { error: `El odómetro excede por más de ${maxOdometerJump.toLocaleString('en-US')} millas la referencia de ${odometerReference.toLocaleString('en-US')} millas. Verifica que no haya un cero de más.` }); return true; }
     const driverResult = await pool.query('SELECT id, name, motive_driver_id FROM drivers WHERE id = $1 AND active = TRUE', [driverId]);
     if (!driverResult.rowCount) { sendJson(response, 400, { error: 'Selecciona un chofer válido de la lista.' }); return true; }
-    const unit = unitResult.rows[0], driver = driverResult.rows[0], client = await pool.connect();
+    const driver = driverResult.rows[0], client = await pool.connect();
     let savedRecord;
     try {
       await client.query('BEGIN');
