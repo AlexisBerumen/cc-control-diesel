@@ -38,13 +38,13 @@
 
       <section class="layout">
         <form id="fuel-form" class="card form-card" novalidate>
-          <div class="section-title"><span class="step">1</span><div><h2>Unidad</h2><p>Selecciona una unidad registrada.</p></div></div>
-          <label for="unit-search">Número de unidad</label>
+          <div class="section-title"><span class="step">1</span><div><h2>Unidad</h2><p>Busca y toca tu unidad en la lista.</p></div></div>
+          <label for="unit-search">Buscar mi unidad</label>
           <div class="autocomplete">
-            <input id="unit-search" name="unitSearch" type="text" autocomplete="off" placeholder="Ej. 024" aria-describedby="unit-help" />
+            <input id="unit-search" name="unitSearch" type="text" autocomplete="off" placeholder="Escribe el número de tu unidad" aria-describedby="unit-help" />
             <div id="unit-options" class="suggestions" role="listbox" hidden></div>
           </div>
-          <p id="unit-help" class="field-help">Escribe el número tal como está asignado. No se aceptan unidades no registradas.</p>
+          <p id="unit-help" class="field-help">Escribe algunas letras o números y toca la unidad correcta.</p>
           <div id="selected-unit" class="unit-confirmation" hidden></div>
           <p id="unit-error" class="error" role="alert"></p>
 
@@ -52,12 +52,12 @@
           <div class="section-title"><span class="step">2</span><div><h2>Datos de la carga</h2><p>Usa los valores que aparecen en el ticket o bomba.</p></div></div>
           <div class="field-grid">
             <div class="full-width">
-              <label for="driver-search">Nombre del chofer</label>
+              <label for="driver-search">Buscar mi nombre</label>
               <div class="autocomplete">
-                <input id="driver-search" name="driverSearch" type="text" autocomplete="off" placeholder="Escribe el nombre del chofer" aria-describedby="driver-help" required />
+                <input id="driver-search" name="driverSearch" type="text" autocomplete="off" placeholder="Escribe algunas letras de tu nombre" aria-describedby="driver-help" required />
                 <div id="driver-options" class="suggestions" role="listbox" hidden></div>
               </div>
-              <p id="driver-help" class="field-help">Selecciona un chofer registrado en Motive.</p>
+              <p id="driver-help" class="field-help">Toca tu nombre cuando aparezca en la lista.</p>
               <div id="selected-driver" class="unit-confirmation" hidden></div>
               <p id="driver-error" class="error" role="alert"></p>
             </div>
@@ -94,21 +94,21 @@
             <label class="upload-box" id="ticket-box" for="ticket-photo">
               <input id="ticket-photo" name="ticketPhoto" type="file" accept="image/*" capture="environment" required />
               <span class="upload-icon">▣</span>
-              <strong>Foto del ticket o bomba</strong>
+              <strong>Tomar foto de bomba o ticket</strong>
               <small>JPG, PNG o HEIC</small>
-              <span class="file-name">Tomar o seleccionar foto</span>
+              <span class="file-name">Toca aquí para tomar la foto</span>
             </label>
             <label class="upload-box" id="odometer-box" for="odometer-photo">
               <input id="odometer-photo" name="odometerPhoto" type="file" accept="image/*" capture="environment" required />
               <span class="upload-icon">◉</span>
-              <strong>Foto del odómetro</strong>
+              <strong>Tomar foto del odómetro</strong>
               <small>El número debe verse completo</small>
-              <span class="file-name">Tomar o seleccionar foto</span>
+              <span class="file-name">Toca aquí para tomar la foto</span>
             </label>
           </div>
           <p id="evidence-error" class="error" role="alert"></p>
 
-          <button class="primary-button" type="submit">Revisar y enviar carga <span>→</span></button>
+          <button class="primary-button" type="submit">Revisar datos y enviar <span>→</span></button>
         </form>
 
         <aside class="card review-card">
@@ -155,6 +155,16 @@
       <p class="eyebrow">Confirma la información</p><h2>¿Todo coincide con tus evidencias?</h2>
       <div id="dialog-summary" class="dialog-summary"></div>
       <div class="dialog-actions"><button id="edit-button" class="secondary-button" value="cancel">Corregir</button><button id="confirm-button" class="primary-button" value="confirm">Confirmar y guardar</button></div>
+    </dialog>
+    <dialog id="success-dialog" class="confirmation-dialog success-dialog">
+      <form method="dialog">
+        <div class="success-icon" aria-hidden="true">✓</div>
+        <p class="eyebrow">Carga registrada</p>
+        <h2>¡Listo!</h2>
+        <p class="muted">La evidencia se guardó correctamente.</p>
+        <p id="success-folio" class="success-folio"></p>
+        <button class="primary-button" value="close">Registrar otra carga</button>
+      </form>
     </dialog>
     <dialog id="login-dialog" class="confirmation-dialog login-dialog">
       <form method="dialog"><button class="close-dialog" value="cancel" aria-label="Cerrar">×</button></form>

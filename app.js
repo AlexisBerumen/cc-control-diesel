@@ -248,21 +248,15 @@ function resetFuelForm() {
   $('#fuel-form').reset(); selectedUnit = null; selectedDriver = null; $('#selected-unit').hidden = true; $('#selected-driver').hidden = true; $('#unit-options').hidden = true; $('#driver-options').hidden = true; $('#odometer-note').textContent = 'Selecciona una unidad para validar el kilometraje.';
   $('#odometer-warning').textContent = '';
   $('#odometer').classList.remove('input-invalid', 'input-warning');
-  document.querySelectorAll('.upload-box').forEach(el => { el.classList.remove('has-file'); el.querySelector('.file-name').textContent = 'Tomar o seleccionar foto'; });
+  document.querySelectorAll('.upload-box').forEach(el => { el.classList.remove('has-file'); el.querySelector('.file-name').textContent = 'Toca aquí para tomar la foto'; });
   document.querySelectorAll('.error').forEach(el => el.textContent = ''); updateReview();
 }
 
 $('#unit-search').addEventListener('input', () => {
-  const typed = $('#unit-search').value.trim();
-  const exact = units.find(u => u.number.toLowerCase() === typed.toLowerCase());
-  if (exact) { setUnit(exact); return; }
   selectedUnit = null; $('#selected-unit').hidden = true; $('#odometer-warning').textContent = ''; $('#odometer').classList.remove('input-warning'); setError('#unit-error', ''); updateSuggestions(); updateReview();
 });
 $('#unit-options').addEventListener('click', e => { const button = e.target.closest('[data-id]'); if (button) setUnit(units.find(u => u.id === button.dataset.id)); });
 $('#driver-search').addEventListener('input', () => {
-  const typed = $('#driver-search').value.trim();
-  const exact = drivers.find(driver => driver.name.toLowerCase() === typed.toLowerCase());
-  if (exact) { setDriver(exact); return; }
   selectedDriver = null; $('#selected-driver').hidden = true; setError('#driver-error', ''); updateDriverSuggestions(); updateReview();
 });
 $('#driver-options').addEventListener('click', e => { const button = e.target.closest('[data-driver-id]'); if (button) setDriver(drivers.find(driver => driver.id === button.dataset.driverId)); });
@@ -305,7 +299,12 @@ $('#confirm-button').addEventListener('click', async e => {
   }
   confirmButton.disabled = false;
   if (isAdmin) { records.push(saved); renderRecords(); }
-  $('#confirm-dialog').close(); resetFuelForm(); showToast(`Carga ${saved.folio} guardada.${userRole === 'admin' ? ` ${motiveAssignmentLabel(saved)}` : ''}`); location.hash = '#registro';
+  $('#confirm-dialog').close();
+  resetFuelForm();
+  $('#success-folio').textContent = `Folio de carga: ${saved.folio}`;
+  $('#success-dialog').showModal();
+  showToast(`Carga ${saved.folio} guardada.`);
+  location.hash = '#registro';
 });
 $('#unit-form').addEventListener('submit', e => { e.preventDefault(); const numberInput = $('#new-unit-number'), plates = $('#new-unit-plates').value.trim().toUpperCase(), description = $('#new-unit-description').value.trim(); const unitNumber = numberInput.value.trim().toUpperCase(); if (units.some(u => u.number.toUpperCase() === unitNumber)) { showToast('Ese número de unidad ya está registrado.'); return; } units.push({ id: crypto.randomUUID(), number: unitNumber, plates, description }); save(STORAGE.units, units); e.target.reset(); renderUnitCatalog(); showToast(`Unidad ${unitNumber} agregada al catálogo.`); });
 $('#export-csv').addEventListener('click', () => { if (!records.length) { showToast('Aún no hay registros para exportar.'); return; } const headings = ['Folio','Fecha','Unidad','Chofer','Identificador','Odómetro (millas)','Galones','Importe (MXN)','Estación','Archivo ticket','Archivo odómetro','URL ticket','URL odómetro']; const rows = records.map(r => [r.folio, new Date(r.createdAt).toLocaleString('es-MX'),r.unitNumber,r.driverName ?? '',r.plates,r.odometer,r.gallons,r.amount ?? '',r.station,r.ticketFile,r.odometerFile,r.ticketUrl ?? '',r.odometerUrl ?? '']); const csv = [headings,...rows].map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'})); link.download = `cargas-diesel-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); });

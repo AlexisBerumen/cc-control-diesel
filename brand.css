@@ -35,11 +35,21 @@ input { border-color: #cbd4e7; border-radius: 10px; }
 input:focus { border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12); }
 .suggestions { border-color: #cbd4e7; box-shadow: 0 12px 28px rgba(16, 29, 82, .16); }
 .suggestion:hover { background: #f4f6ff; }
+.suggestions .suggestion { min-height: 62px; padding: 13px 15px; }
+.suggestions .suggestion strong { font-size: 16px; }
+.suggestions .suggestion small { display: block; margin-top: 3px; font-size: 13px; }
 .support-suggestion { cursor: default; background: #fff9ea; }
 .support-suggestion:hover { background: #fff4d5; }
 .support-suggestion small { display: block; line-height: 1.35; }
 .support-whatsapp { display: inline-flex; margin-top: 9px; padding: 7px 10px; border-radius: 7px; background: #1f9d5c; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
 .support-whatsapp:hover { background: #168349; }
+.success-dialog { max-width: 420px; text-align: center; }
+.success-dialog form { display: grid; justify-items: center; gap: 12px; }
+.success-dialog .eyebrow { margin: 2px 0 0; }
+.success-dialog .muted { margin: 0; }
+.success-icon { display: grid; width: 72px; height: 72px; place-items: center; border-radius: 50%; background: #e8f7ee; color: #147a51; font-size: 42px; font-weight: 700; }
+.success-folio { margin: 6px 0 10px; padding: 11px 14px; border-radius: 9px; background: #eef2ff; color: #1b3584; font-size: 17px; font-weight: 700; }
+.success-dialog .primary-button { min-width: 220px; }
 .divider { border-color: #e2e7f2; }
 .unit-confirmation { border-color: #bde4cc; }
 .upload-box { border-color: #b9c7e2; background: #f9faff; border-radius: 13px; }
@@ -47,6 +57,7 @@ input:focus { border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12
 .upload-icon { color: #dc2638; }
 .primary-button { border-color: #dc2638; background: linear-gradient(120deg, #e33344, #c91e31); border-radius: 10px; box-shadow: 0 8px 16px rgba(201, 30, 49, .19); }
 .primary-button:hover { background: linear-gradient(120deg, #c91e31, #ae1425); border-color: #ae1425; transform: translateY(-1px); }
+.form-card > .primary-button { min-height: 58px; font-size: 16px; }
 .secondary-button { border-color: #bcc7df; border-radius: 10px; color: #1b3277; }
 .secondary-button:hover { background: #f0f3ff; border-color: #8799c5; }
 .record-actions { display: flex; flex-wrap: wrap; gap: 8px; }
