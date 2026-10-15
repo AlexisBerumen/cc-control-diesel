@@ -359,8 +359,8 @@ $('#confirm-button').addEventListener('click', async e => {
   location.hash = '#registro';
 });
 function exportRows(recordsForExport) {
-  const headings = ['Folio', 'Fecha', 'Unidad', 'Chofer', 'Odómetro (millas)', 'Galones', 'Importe (MXN)', 'Estación', 'Alerta de odómetro'];
-  const rows = recordsForExport.map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.odometer, record.gallons, record.amount ?? '', record.station, odometerExportAlert(record)]);
+  const headings = ['Folio', 'Fecha', 'Unidad', 'Chofer', 'Odómetro (millas)', 'Galones', 'Importe (MXN)', 'Estación', 'Evidencia bomba', 'Evidencia odómetro', 'Alerta de odómetro'];
+  const rows = recordsForExport.map((record) => [record.folio, new Date(record.createdAt).toLocaleString('es-MX'), record.unitNumber, record.driverName || '', record.odometer, record.gallons, record.amount ?? '', record.station, record.ticketUrl ? 'Bomba (clic aquí)' : '', record.odometerUrl ? 'Odómetro (clic aquí)' : '', odometerExportAlert(record)]);
   return [headings, ...rows];
 }
 function odometerExportAlert(record) {
@@ -424,23 +424,33 @@ function spreadsheetCell(value, cellReference, styleIndex, numeric) {
 }
 function exportExcelFile(recordsForExport) {
   const rows = exportRows(recordsForExport);
+  const hyperlinkColumns = { 8: 'ticketUrl', 9: 'odometerUrl' };
+  const hyperlinks = [];
   const sheetRows = rows.map((row, rowIndex) => {
     const warning = rowIndex > 0 && recordsForExport[rowIndex - 1]?.odometerWarning;
     return `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => {
       const numeric = rowIndex > 0 && [4, 5, 6].includes(columnIndex);
-      const styleIndex = numeric ? (warning ? 3 : 2) : (warning ? 1 : 0);
-      return spreadsheetCell(value, `${spreadsheetColumn(columnIndex)}${rowIndex + 1}`, styleIndex, numeric);
+      const record = rowIndex > 0 ? recordsForExport[rowIndex - 1] : null;
+      const evidenceField = hyperlinkColumns[columnIndex];
+      const cellReference = `${spreadsheetColumn(columnIndex)}${rowIndex + 1}`;
+      const hasHyperlink = Boolean(evidenceField && record?.[evidenceField]);
+      if (hasHyperlink) hyperlinks.push({ cellReference, url: record[evidenceField] });
+      const styleIndex = numeric ? (warning ? 3 : 2) : (hasHyperlink ? (warning ? 5 : 4) : (warning ? 1 : 0));
+      return spreadsheetCell(value, cellReference, styleIndex, numeric);
     }).join('')}</row>`;
   }).join('');
-  const columnWidths = [18, 23, 16, 26, 20, 13, 17, 22, 48].map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join('');
+  const columnWidths = [18, 23, 16, 26, 20, 13, 17, 22, 18, 20, 48].map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join('');
+  const hyperlinksXml = hyperlinks.length ? `<hyperlinks>${hyperlinks.map((link, index) => `<hyperlink ref="${link.cellReference}" r:id="rId${index + 1}"/>`).join('')}</hyperlinks>` : '';
+  const hyperlinkRelationships = hyperlinks.length ? `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${hyperlinks.map((link, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xmlEscape(link.url)}" TargetMode="External"/>`).join('')}</Relationships>` : null;
   const files = [
     ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
     ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
     ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Cargas de diesel" sheetId="1" r:id="rId1"/></sheets></workbook>'],
     ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
-    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="4" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1" applyNumberFormat="1"/></cellXfs></styleSheet>'],
-    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${columnWidths}</cols><sheetData>${sheetRows}</sheetData><autoFilter ref="A1:I${rows.length}"/></worksheet>`]
+    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="4" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs></styleSheet>'],
+    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${columnWidths}</cols><sheetData>${sheetRows}</sheetData>${hyperlinksXml}<autoFilter ref="A1:K${rows.length}"/></worksheet>`]
   ];
+  if (hyperlinkRelationships) files.push(['xl/worksheets/_rels/sheet1.xml.rels', hyperlinkRelationships]);
   downloadFile(xlsxZip(files), `cargas-diesel-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 async function exportExcel() {
