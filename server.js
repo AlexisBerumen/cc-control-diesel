@@ -18,8 +18,8 @@ const maxRecordsExport = 10_000;
 const businessTimeZone = process.env.BUSINESS_TIME_ZONE || 'America/Mexico_City';
 let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
-// It reads locations/users/camera connections and can update only the permanent driver of a vehicle.
-const motiveScope = 'locations.vehicle_locations_list users.read vehicles.manage camera_connections.read';
+// It reads locations/users and can update only the permanent driver of a vehicle.
+const motiveScope = 'locations.vehicle_locations_list users.read vehicles.manage';
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 function sendJson(response, status, data) {
@@ -299,37 +299,17 @@ function motiveVehicleNumber(entry) {
   const vehicle = entry?.vehicle && typeof entry.vehicle === 'object' ? entry.vehicle : entry;
   return cleanText(vehicle?.number || vehicle?.vehicle_number || vehicle?.vehicleNumber || '', 80);
 }
-function cameraTimestamp(entry) {
-  const timestamp = new Date(entry?.updated_at || entry?.updatedAt || entry?.created_at || entry?.createdAt || 0).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
+function motiveGpsSerial(entry) {
+  const vehicle = entry?.vehicle && typeof entry.vehicle === 'object' ? entry.vehicle : entry;
+  const gateway = vehicle?.eld_device || vehicle?.eldDevice || vehicle?.vehicle_gateway || vehicle?.vehicleGateway || {};
+  return cleanText(gateway.identifier || gateway.serial_number || gateway.serialNumber || '', 120);
 }
-async function cameraInventoryReport() {
-  const [vehicles, connections] = await Promise.all([
-    fetchMotiveList('/v1/vehicles', ['vehicles']),
-    fetchMotiveList('/v1/camera_connections', ['camera_connections'], { type: 'connected', status: 'correct', sort_direction: 'desc' })
-  ]);
-  const camerasByVehicle = new Map();
-  for (const rawEntry of connections) {
-    const entry = rawEntry?.camera_connection && typeof rawEntry.camera_connection === 'object' ? rawEntry.camera_connection : rawEntry;
+async function gpsInventoryReport() {
+  const vehicles = await fetchMotiveList('/v1/vehicles', ['vehicles']);
+  return vehicles.map((entry) => {
     const number = motiveVehicleNumber(entry);
-    const serial = cleanText(entry?.cam_serial_num || entry?.camSerialNum || entry?.camera_serial_number || '', 120);
-    if (!number || !serial) continue;
-    const key = number.toUpperCase(), current = camerasByVehicle.get(key);
-    if (!current || cameraTimestamp(entry) > current.timestamp) camerasByVehicle.set(key, { serial, type: cleanText(entry?.cam_type || entry?.camType || '', 40), timestamp: cameraTimestamp(entry) });
-  }
-  const seen = new Set();
-  const rows = vehicles.map((entry) => {
-    const number = motiveVehicleNumber(entry);
-    if (!number) return null;
-    const key = number.toUpperCase();
-    seen.add(key);
-    const camera = camerasByVehicle.get(key);
-    return [number, camera?.serial || 'No tiene cámara'];
-  }).filter(Boolean);
-  for (const [number, camera] of camerasByVehicle) {
-    if (!seen.has(number)) rows.push([number, camera.serial]);
-  }
-  return rows.sort((left, right) => left[0].localeCompare(right[0], 'es-MX', { numeric: true }));
+    return number ? [number, motiveGpsSerial(entry) || 'No tiene GPS'] : null;
+  }).filter(Boolean).sort((left, right) => left[0].localeCompare(right[0], 'es-MX', { numeric: true }));
 }
 async function syncMotiveVehiclesInternal() {
   const accessToken = await getMotiveAccessToken();
@@ -468,11 +448,11 @@ async function handleApi(request, response, url) {
     if (!motiveConfigured()) { sendJson(response, 503, { error: 'Falta configurar Motive en Railway.' }); return true; }
     sendJson(response, 200, await syncMotiveVehicles()); return true;
   }
-  if (url.pathname === '/api/motive/camera-inventory.csv' && request.method === 'GET') {
+  if (url.pathname === '/api/motive/gps-inventory.csv' && request.method === 'GET') {
     if (!await requireAdmin(request, response)) return true;
     if (!motiveConfigured()) { sendJson(response, 503, { error: 'Falta configurar Motive en Railway.' }); return true; }
-    const rows = await cameraInventoryReport();
-    sendCsv(response, `inventario-camaras-motive-${new Date().toISOString().slice(0, 10)}.csv`, [['Número de unidad', 'Número de serie de cámara'], ...rows]);
+    const rows = await gpsInventoryReport();
+    sendCsv(response, `inventario-gps-motive-${new Date().toISOString().slice(0, 10)}.csv`, [['Número de unidad', 'Número de serie de GPS'], ...rows]);
     return true;
   }
   if (url.pathname === '/api/units' && request.method === 'GET') {
