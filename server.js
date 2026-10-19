@@ -18,13 +18,26 @@ const maxRecordsExport = 10_000;
 const businessTimeZone = process.env.BUSINESS_TIME_ZONE || 'America/Mexico_City';
 let motiveSyncPromise = null;
 // Motive's authorization screen accepts the specific scope enabled for the app.
-// It reads locations/users and can update only the permanent driver of a vehicle.
-const motiveScope = 'locations.vehicle_locations_list users.read vehicles.manage';
+// It reads locations/users/camera connections and can update only the permanent driver of a vehicle.
+const motiveScope = 'locations.vehicle_locations_list users.read vehicles.manage camera_connections.read';
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 function sendJson(response, status, data) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   response.end(JSON.stringify(data));
+}
+function sendCsv(response, filename, rows) {
+  const csvValue = (value) => {
+    const text = String(value ?? '');
+    const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+    return `"${safeText.replaceAll('"', '""')}"`;
+  };
+  response.writeHead(200, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Cache-Control': 'no-store'
+  });
+  response.end(`\ufeff${rows.map((row) => row.map(csvValue).join(',')).join('\n')}`);
 }
 function unitId(number) {
   return `unit-${number.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
@@ -253,6 +266,71 @@ async function syncMotiveVehicles() {
   try { return await motiveSyncPromise; }
   finally { motiveSyncPromise = null; }
 }
+function motiveList(data, keys) {
+  if (Array.isArray(data)) return data;
+  for (const key of keys) {
+    const value = data?.[key] ?? data?.data?.[key];
+    if (Array.isArray(value)) return value;
+  }
+  return Array.isArray(data?.data) ? data.data : [];
+}
+function motiveTotal(data, entries) {
+  const value = Number(data?.total ?? data?.pagination?.total ?? data?.data?.total);
+  return Number.isSafeInteger(value) && value >= 0 ? value : entries.length;
+}
+async function fetchMotiveList(pathname, keys, query = {}) {
+  const accessToken = await getMotiveAccessToken();
+  let page = 1, total = Infinity;
+  const all = [];
+  while ((page - 1) * 100 < total && page <= 100) {
+    const search = new URLSearchParams({ ...query, per_page: '100', page_no: String(page) });
+    const response = await fetch(`https://api.gomotive.com${pathname}?${search}`, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'X-Time-Zone': businessTimeZone } });
+    const data = await readMotiveResponse(response);
+    if (!response.ok) throw new Error(motiveErrorMessage(data, `Motive no permitió consultar ${pathname}.`));
+    const entries = motiveList(data, keys);
+    all.push(...entries);
+    total = motiveTotal(data, entries);
+    if (!entries.length || entries.length < 100) break;
+    page += 1;
+  }
+  return all;
+}
+function motiveVehicleNumber(entry) {
+  const vehicle = entry?.vehicle && typeof entry.vehicle === 'object' ? entry.vehicle : entry;
+  return cleanText(vehicle?.number || vehicle?.vehicle_number || vehicle?.vehicleNumber || '', 80);
+}
+function cameraTimestamp(entry) {
+  const timestamp = new Date(entry?.updated_at || entry?.updatedAt || entry?.created_at || entry?.createdAt || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+async function cameraInventoryReport() {
+  const [vehicles, connections] = await Promise.all([
+    fetchMotiveList('/v1/vehicles', ['vehicles']),
+    fetchMotiveList('/v1/camera_connections', ['camera_connections'], { type: 'connected', status: 'correct', sort_direction: 'desc' })
+  ]);
+  const camerasByVehicle = new Map();
+  for (const rawEntry of connections) {
+    const entry = rawEntry?.camera_connection && typeof rawEntry.camera_connection === 'object' ? rawEntry.camera_connection : rawEntry;
+    const number = motiveVehicleNumber(entry);
+    const serial = cleanText(entry?.cam_serial_num || entry?.camSerialNum || entry?.camera_serial_number || '', 120);
+    if (!number || !serial) continue;
+    const key = number.toUpperCase(), current = camerasByVehicle.get(key);
+    if (!current || cameraTimestamp(entry) > current.timestamp) camerasByVehicle.set(key, { serial, type: cleanText(entry?.cam_type || entry?.camType || '', 40), timestamp: cameraTimestamp(entry) });
+  }
+  const seen = new Set();
+  const rows = vehicles.map((entry) => {
+    const number = motiveVehicleNumber(entry);
+    if (!number) return null;
+    const key = number.toUpperCase();
+    seen.add(key);
+    const camera = camerasByVehicle.get(key);
+    return [number, camera?.serial || 'No tiene cámara'];
+  }).filter(Boolean);
+  for (const [number, camera] of camerasByVehicle) {
+    if (!seen.has(number)) rows.push([number, camera.serial]);
+  }
+  return rows.sort((left, right) => left[0].localeCompare(right[0], 'es-MX', { numeric: true }));
+}
 async function syncMotiveVehiclesInternal() {
   const accessToken = await getMotiveAccessToken();
   let page = 1, total = Infinity, matched = 0, received = 0, vehiclesFound = 0, missingNumber = 0, missingOdometer = 0, responseShape = [], motiveEndpoint = 'v2';
@@ -389,6 +467,13 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/motive/sync' && request.method === 'GET') {
     if (!motiveConfigured()) { sendJson(response, 503, { error: 'Falta configurar Motive en Railway.' }); return true; }
     sendJson(response, 200, await syncMotiveVehicles()); return true;
+  }
+  if (url.pathname === '/api/motive/camera-inventory.csv' && request.method === 'GET') {
+    if (!await requireAdmin(request, response)) return true;
+    if (!motiveConfigured()) { sendJson(response, 503, { error: 'Falta configurar Motive en Railway.' }); return true; }
+    const rows = await cameraInventoryReport();
+    sendCsv(response, `inventario-camaras-motive-${new Date().toISOString().slice(0, 10)}.csv`, [['Número de unidad', 'Número de serie de cámara'], ...rows]);
+    return true;
   }
   if (url.pathname === '/api/units' && request.method === 'GET') {
     const result = await pool.query('SELECT id, number, identifier AS plates, description, motive_odometer AS "motiveOdometer", motive_odometer_unit AS "motiveOdometerUnit", motive_odometer_updated_at AS "motiveOdometerUpdatedAt" FROM units ORDER BY number');
