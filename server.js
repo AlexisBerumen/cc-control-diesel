@@ -26,18 +26,51 @@ function sendJson(response, status, data) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   response.end(JSON.stringify(data));
 }
-function sendCsv(response, filename, rows) {
-  const csvValue = (value) => {
-    const text = String(value ?? '');
-    const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
-    return `"${safeText.replaceAll('"', '""')}"`;
-  };
+function xmlEscape(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;'); }
+function spreadsheetColumn(index) { let output = ''; for (let number = index + 1; number; number = Math.floor((number - 1) / 26)) output = String.fromCharCode(65 + (number - 1) % 26) + output; return output; }
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0); }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function xlsxArchive(files) {
+  const parts = [], central = [], offsets = [];
+  let offset = 0;
+  for (const [name, content] of files) {
+    const nameBytes = Buffer.from(name), contentBytes = Buffer.from(content), checksum = crc32(contentBytes);
+    const local = Buffer.alloc(30 + nameBytes.length);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt32LE(checksum, 14); local.writeUInt32LE(contentBytes.length, 18); local.writeUInt32LE(contentBytes.length, 22); local.writeUInt16LE(nameBytes.length, 26); nameBytes.copy(local, 30);
+    parts.push(local, contentBytes); offsets.push(offset); offset += local.length + contentBytes.length;
+    const header = Buffer.alloc(46 + nameBytes.length);
+    header.writeUInt32LE(0x02014b50, 0); header.writeUInt16LE(20, 4); header.writeUInt16LE(20, 6); header.writeUInt32LE(checksum, 16); header.writeUInt32LE(contentBytes.length, 20); header.writeUInt32LE(contentBytes.length, 24); header.writeUInt16LE(nameBytes.length, 28); header.writeUInt32LE(offsets.at(-1), 42); nameBytes.copy(header, 46); central.push(header);
+  }
+  const centralSize = central.reduce((total, item) => total + item.length, 0), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(centralSize, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, ...central, end]);
+}
+function xlsxCell(cellReference, value) {
+  const text = /^[=+\-@]/.test(String(value ?? '')) ? `'${value}` : String(value ?? '');
+  return `<c r="${cellReference}" t="inlineStr"><is><t>${xmlEscape(text)}</t></is></c>`;
+}
+function createSimpleWorkbook(sheetName, rows) {
+  const lastColumn = spreadsheetColumn(Math.max(0, ...rows.map((row) => row.length - 1)));
+  const sheetRows = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => xlsxCell(`${spreadsheetColumn(columnIndex)}${rowIndex + 1}`, value)).join('')}</row>`).join('');
+  const widths = rows[0].map((heading, index) => `<col min="${index + 1}" max="${index + 1}" width="${Math.max(20, String(heading).length + 8)}" customWidth="1"/>`).join('');
+  return xlsxArchive([
+    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'],
+    ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xmlEscape(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'],
+    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths}</cols><sheetData>${sheetRows}</sheetData><autoFilter ref="A1:${lastColumn}${rows.length}"/></worksheet>`]
+  ]);
+}
+function sendExcel(response, filename, sheetName, rows) {
   response.writeHead(200, {
-    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'Content-Disposition': `attachment; filename="${filename}"`,
     'Cache-Control': 'no-store'
   });
-  response.end(`\ufeff${rows.map((row) => row.map(csvValue).join(',')).join('\n')}`);
+  response.end(createSimpleWorkbook(sheetName, rows));
 }
 function unitId(number) {
   return `unit-${number.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
@@ -448,11 +481,11 @@ async function handleApi(request, response, url) {
     if (!motiveConfigured()) { sendJson(response, 503, { error: 'Falta configurar Motive en Railway.' }); return true; }
     sendJson(response, 200, await syncMotiveVehicles()); return true;
   }
-  if (url.pathname === '/api/motive/gps-inventory.csv' && request.method === 'GET') {
+  if (url.pathname === '/api/motive/gps-inventory.xlsx' && request.method === 'GET') {
     if (!await requireAdmin(request, response)) return true;
     if (!motiveConfigured()) { sendJson(response, 503, { error: 'Falta configurar Motive en Railway.' }); return true; }
     const rows = await gpsInventoryReport();
-    sendCsv(response, `inventario-gps-motive-${new Date().toISOString().slice(0, 10)}.csv`, [['Número de unidad', 'Número de serie de GPS'], ...rows]);
+    sendExcel(response, `inventario-gps-motive-${new Date().toISOString().slice(0, 10)}.xlsx`, 'Inventario GPS', [['Número de unidad', 'Número de serie de GPS'], ...rows]);
     return true;
   }
   if (url.pathname === '/api/units' && request.method === 'GET') {
