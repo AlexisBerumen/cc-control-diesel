@@ -332,6 +332,12 @@ function motiveVehicleNumber(entry) {
   const vehicle = entry?.vehicle && typeof entry.vehicle === 'object' ? entry.vehicle : entry;
   return cleanText(vehicle?.number || vehicle?.vehicle_number || vehicle?.vehicleNumber || '', 80);
 }
+function motiveVehicleIsActive(entry) {
+  const vehicle = entry?.vehicle && typeof entry.vehicle === 'object' ? entry.vehicle : entry;
+  const sourceStatus = vehicle?.status ?? vehicle?.availability ?? vehicle?.availability_status;
+  const status = typeof sourceStatus === 'object' && sourceStatus ? sourceStatus.name || sourceStatus.value || sourceStatus.status : sourceStatus;
+  return ['active', 'in_service', 'in service'].includes(String(status || '').trim().toLowerCase());
+}
 function motiveGpsSerial(entry) {
   const vehicle = entry?.vehicle && typeof entry.vehicle === 'object' ? entry.vehicle : entry;
   const gateway = vehicle?.eld_device || vehicle?.eldDevice || vehicle?.vehicle_gateway || vehicle?.vehicleGateway || {};
@@ -339,7 +345,7 @@ function motiveGpsSerial(entry) {
 }
 async function gpsInventoryReport() {
   const vehicles = await fetchMotiveList('/v1/vehicles', ['vehicles']);
-  return vehicles.map((entry) => {
+  return vehicles.filter(motiveVehicleIsActive).map((entry) => {
     const number = motiveVehicleNumber(entry);
     return number ? [number, motiveGpsSerial(entry) || 'No tiene GPS'] : null;
   }).filter(Boolean).sort((left, right) => left[0].localeCompare(right[0], 'es-MX', { numeric: true }));
