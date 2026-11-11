@@ -159,6 +159,22 @@ function renderReconciliationUnitOptions() {
   select.innerHTML = `<option value="">Todas las unidades</option>${units.map((unit) => `<option value="${esc(unit.id)}">${esc(unit.number)} · ${esc(unitDescription(unit))}</option>`).join('')}`;
   select.value = units.some((unit) => unit.id === selected) ? selected : '';
 }
+function renderDriverAssignmentOptions() {
+  const unitSelect = $('#assignment-unit');
+  const driverSelect = $('#assignment-driver');
+  const selectedUnit = unitSelect.value;
+  const selectedDriver = driverSelect.value;
+  unitSelect.innerHTML = `<option value="">Selecciona una unidad</option>${units.map((unit) => `<option value="${esc(unit.id)}">${esc(unit.number)} · ${esc(unitDescription(unit))}</option>`).join('')}`;
+  driverSelect.innerHTML = `<option value="">Selecciona un chofer</option>${drivers.map((driver) => `<option value="${esc(driver.id)}">${esc(driver.name)}</option>`).join('')}`;
+  unitSelect.value = units.some((unit) => unit.id === selectedUnit) ? selectedUnit : '';
+  driverSelect.value = drivers.some((driver) => driver.id === selectedDriver) ? selectedDriver : '';
+}
+function showDriverAssignmentResult(message, status) {
+  const result = $('#driver-assignment-result');
+  result.textContent = message;
+  result.hidden = false;
+  result.className = `driver-assignment-result ${status}`;
+}
 function reconciliationStatusText(row) {
   if (row.status === 'ready') return 'Datos completos';
   if (row.status === 'no_fuel_records') return 'Sin cargas en periodo';
@@ -238,6 +254,29 @@ $('#clear-reconciliation-filter').addEventListener('click', () => {
 });
 $('#reconciliation-unit').addEventListener('change', () => void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.')));
 $('#reconciliation-view-filter').addEventListener('change', () => renderReconciliation(reconciliationData));
+$('#driver-assignment-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const unitId = $('#assignment-unit').value;
+  const driverId = $('#assignment-driver').value;
+  if (!unitId || !driverId) { showDriverAssignmentResult('Selecciona una unidad y un chofer antes de continuar.', 'error'); return; }
+  const unit = units.find((item) => item.id === unitId);
+  const driver = drivers.find((item) => item.id === driverId);
+  if (!unit || !driver) { showDriverAssignmentResult('La unidad o el chofer seleccionado ya no están disponibles. Actualiza la página e inténtalo de nuevo.', 'error'); return; }
+  if (!confirm(`Se verificará en Motive la asignación de ${driver.name} a la unidad ${unit.number}. ¿Deseas continuar?`)) return;
+  const button = $('#assign-driver-button');
+  button.disabled = true;
+  showDriverAssignmentResult('Verificando la asignación con Motive...', 'pending');
+  try {
+    const response = await fetch('/api/driver-assignments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unitId, driverId }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible actualizar la asignación.');
+    const prefix = data.status === 'already_assigned' ? 'Sin cambios: ' : data.status === 'updated' ? 'Asignación actualizada: ' : 'Pendiente: ';
+    showDriverAssignmentResult(`${prefix}${data.message || 'La operación se completó.'}`, data.status === 'pending' ? 'pending' : 'success');
+    showToast(data.status === 'updated' ? `Chofer actualizado en Motive para la unidad ${data.unitNumber}.` : data.message || 'Asignación verificada.');
+  } catch (error) {
+    showDriverAssignmentResult(error.message || 'No fue posible actualizar la asignación.', 'error');
+  } finally { button.disabled = false; }
+});
 async function applyRecordsFilter() {
   const from = $('#records-date-from').value;
   const to = $('#records-date-to').value;
@@ -621,9 +660,11 @@ function setAdminInterface(authenticated, role = null) {
   $('#registros').hidden = !authenticated;
   $('#records-link').hidden = !authenticated;
   $('#conciliacion').hidden = !authenticated;
+  $('#asignar-chofer').hidden = !authenticated;
   $('#unidades').hidden = !authenticated;
   $('#unit-form').hidden = role !== 'admin';
   $('#reconciliation-link').hidden = !authenticated;
+  $('#driver-assignment-link').hidden = !authenticated;
   $('#units-link').hidden = !authenticated;
   $('#login-button').hidden = authenticated;
   $('#logout-button').hidden = !authenticated;
@@ -643,6 +684,7 @@ async function synchronizeWithDatabase() {
     if (unitsResponse.ok) { units = await unitsResponse.json(); save(STORAGE.units, units); }
     if (driversResponse.ok) { drivers = await driversResponse.json(); save(STORAGE.drivers, drivers); }
     renderReconciliationUnitOptions();
+    renderDriverAssignmentOptions();
     if (admin) {
       if (!$('#reconciliation-date-from').value || !$('#reconciliation-date-to').value) setDefaultReconciliationRange();
       await Promise.all([loadRecordsPage(1), loadReconciliation()]);
@@ -700,4 +742,4 @@ $('#logout-button').addEventListener('click', async () => {
   showToast('Sesión cerrada.');
 });
 
-setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderRecords(); renderReconciliation(); updateReview(); synchronizeWithDatabase();
+setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); updateReview(); synchronizeWithDatabase();

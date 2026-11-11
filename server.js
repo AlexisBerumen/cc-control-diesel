@@ -398,7 +398,11 @@ async function syncMotiveVehiclesInternal() {
       const number = vehicleDetails.number || vehicle.number || vehicleDetails.vehicle_number || vehicle.vehicle_number;
       const reading = location.true_odometer ?? location.odometer ?? vehicleDetails.true_odometer ?? vehicleDetails.odometer;
       if (!number) { missingNumber += 1; continue; }
-      if (!Number.isFinite(Number(reading)) || Number(reading) <= 0) { missingOdometer += 1; continue; }
+      if (!Number.isFinite(Number(reading)) || Number(reading) <= 0) {
+        const motiveVehicleId = vehicleDetails.id || vehicle.id;
+        if (motiveVehicleId) await pool.query('UPDATE units SET motive_vehicle_id = $1 WHERE LOWER(number) = LOWER($2)', [String(motiveVehicleId), number]);
+        missingOdometer += 1; continue;
+      }
       const motiveTimestamp = new Date(location.located_at || location.updated_at || vehicleDetails.updated_at || Date.now());
       const observedAt = Number.isFinite(motiveTimestamp.getTime()) ? motiveTimestamp.toISOString() : new Date().toISOString();
       const updated = await pool.query('UPDATE units SET motive_vehicle_id = $1, motive_odometer = $2, motive_odometer_unit = $3, motive_odometer_updated_at = $4 WHERE LOWER(number) = LOWER($5) RETURNING id', [String(vehicleDetails.id || vehicle.id), Number(reading), 'mi', observedAt, number]);
@@ -539,8 +543,21 @@ async function handleApi(request, response, url) {
     return true;
   }
   if (url.pathname === '/api/drivers' && request.method === 'GET') {
-    const result = await pool.query('SELECT id, name FROM drivers WHERE active = TRUE ORDER BY name');
+    const result = await pool.query('SELECT id, motive_driver_id AS "motiveDriverId", name FROM drivers WHERE active = TRUE ORDER BY name');
     sendJson(response, 200, result.rows); return true;
+  }
+  if (url.pathname === '/api/driver-assignments' && request.method === 'POST') {
+    if (!await requireStaff(request, response)) return true;
+    const body = await readJson(request);
+    const unitId = cleanText(body.unitId, 80), driverId = cleanText(body.driverId, 100);
+    if (!unitId || !driverId) { sendJson(response, 400, { error: 'Selecciona una unidad y un chofer válidos.' }); return true; }
+    const unitResult = await pool.query('SELECT id, number, motive_vehicle_id FROM units WHERE id = $1', [unitId]);
+    const driverResult = await pool.query('SELECT id, name, motive_driver_id FROM drivers WHERE id = $1 AND active = TRUE', [driverId]);
+    if (!unitResult.rowCount) { sendJson(response, 404, { error: 'La unidad seleccionada no existe.' }); return true; }
+    if (!driverResult.rowCount) { sendJson(response, 404, { error: 'El chofer seleccionado no existe o está inactivo.' }); return true; }
+    const unit = unitResult.rows[0], driver = driverResult.rows[0];
+    const assignment = await synchronizeMotivePermanentDriver(unit, driver);
+    sendJson(response, 200, { unitNumber: unit.number, driverName: driver.name, ...assignment }); return true;
   }
   if (url.pathname === '/api/evidence' && request.method === 'POST') {
     const body = await readJson(request, 12_000_000);
