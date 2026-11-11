@@ -20,6 +20,7 @@ let isAdmin = false;
 let userRole = null;
 let activeRecordsRange = { from: '', to: '' };
 let recordsPagination = { page: 1, limit: 20, total: 0, totalPages: 1 };
+let reconciliationData = null;
 let unitCatalogPage = 1;
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
@@ -180,6 +181,12 @@ function setReconciliationKpis(rows = []) {
   $('#reconciliation-kpi-gallons').textContent = rows.length ? `${number(totalGallons)} gal` : '—';
   $('#reconciliation-kpi-mpg').textContent = completeGallons > 0 ? number(completeMiles / completeGallons) : '—';
 }
+function reconciliationRowsForView(rows) {
+  const filter = $('#reconciliation-view-filter').value;
+  if (filter === 'missing-readings') return rows.filter((row) => row.status === 'insufficient_readings');
+  if (filter === 'all') return rows;
+  return rows.filter((row) => row.miles !== null && row.miles !== undefined && Number.isFinite(Number(row.miles)));
+}
 function renderReconciliation(data = null) {
   const body = $('#reconciliation-body');
   const summary = $('#reconciliation-summary');
@@ -191,12 +198,15 @@ function renderReconciliation(data = null) {
     setReconciliationKpis();
     return;
   }
-  const rows = data.rows || [];
+  const allRows = data.rows || [];
+  const rows = reconciliationRowsForView(allRows);
   body.innerHTML = rows.length ? rows.map((row) => `<tr class="reconciliation-${esc(row.status)}"><td><strong>${esc(row.unitNumber)}</strong><br><small>${esc(row.description || 'Sin descripción')}</small></td><td>${valueOrDash(row.odometerStart, ' mi')}</td><td>${valueOrDash(row.odometerEnd, ' mi')}</td><td>${valueOrDash(row.miles, ' mi')}</td><td>${valueOrDash(row.gallons, ' gal')}</td><td>${row.mpg === null || row.mpg === undefined ? '—' : number(row.mpg)}</td><td>${number(row.fuelLoadCount || 0)}</td><td>${reconciliationStatus(row)}</td></tr>`).join('') : '<tr class="empty"><td colspan="8">No hay unidades para el filtro seleccionado.</td></tr>';
-  const totals = data.summary || {};
-  summary.textContent = `${number(totals.totalUnits || 0)} unidad(es) · ${number(totals.ready || 0)} con cálculo disponible · ${number(totals.insufficientReadings || 0)} con lecturas insuficientes · ${number(totals.noFuelRecords || 0)} sin cargas.`;
-  insight.textContent = totals.ready
-    ? `El periodo ya tiene ${number(totals.ready)} unidad(es) con información completa para revisar consumo.`
+  const ready = rows.filter((row) => row.status === 'ready').length;
+  const missing = rows.filter((row) => row.status === 'insufficient_readings').length;
+  const withoutFuel = rows.filter((row) => row.status === 'no_fuel_records').length;
+  summary.textContent = `Mostrando ${number(rows.length)} de ${number(allRows.length)} unidad(es) · ${number(ready)} con datos completos · ${number(missing)} con lecturas insuficientes · ${number(withoutFuel)} sin cargas.`;
+  insight.textContent = ready
+    ? `El periodo ya tiene ${number(ready)} unidad(es) con información completa para revisar consumo.`
     : 'Aún no hay suficientes pares de lecturas en este rango. La información se completará conforme Motive siga sincronizando odómetros.';
   setReconciliationKpis(rows);
 }
@@ -209,15 +219,18 @@ async function loadReconciliation() {
   const response = await fetch(`/api/reconciliation?${params.toString()}`);
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'No fue posible consultar la conciliación.');
+  reconciliationData = data;
   renderReconciliation(data);
 }
 $('#apply-reconciliation-filter').addEventListener('click', () => void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.')));
 $('#clear-reconciliation-filter').addEventListener('click', () => {
   setDefaultReconciliationRange();
   $('#reconciliation-unit').value = '';
+  $('#reconciliation-view-filter').value = 'with-miles';
   void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.'));
 });
 $('#reconciliation-unit').addEventListener('change', () => void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.')));
+$('#reconciliation-view-filter').addEventListener('change', () => renderReconciliation(reconciliationData));
 async function applyRecordsFilter() {
   const from = $('#records-date-from').value;
   const to = $('#records-date-to').value;
@@ -594,6 +607,7 @@ async function synchronizeWithDatabase() {
       recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
       localStorage.removeItem(STORAGE.records);
       renderRecords();
+      reconciliationData = null;
       renderReconciliation();
     }
     renderUnitCatalog(); updateReview();
@@ -633,6 +647,7 @@ $('#logout-button').addEventListener('click', async () => {
   try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* La interfaz se cierra aun si hubo un problema de red. */ }
   records = [];
   recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
+  reconciliationData = null;
   localStorage.removeItem(STORAGE.records);
   setAdminInterface(false);
   renderRecords();

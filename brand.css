@@ -106,7 +106,7 @@ th { background: #eef2ff; color: #324a91; }
 .odometer-reset { margin-top: 8px; border: 1px solid #c91e31; border-radius: 7px; background: #fff5f6; color: #a41528; font: 700 11px "DM Sans", sans-serif; padding: 6px 8px; cursor: pointer; }
 .odometer-reset:hover { background: #ffe8eb; }
 .odometer-reset:disabled { opacity: .55; cursor: wait; }
-.reconciliation-filters { display: grid; grid-template-columns: minmax(145px, 180px) minmax(145px, 180px) minmax(180px, 1fr) auto auto; gap: 10px; align-items: end; margin: 0 0 14px; padding: 14px; border: 1px solid #d7def0; border-radius: 10px; background: #f7f9ff; }
+.reconciliation-filters { display: grid; grid-template-columns: minmax(130px, 160px) minmax(130px, 160px) minmax(165px, 1fr) minmax(165px, 1fr) auto auto; gap: 10px; align-items: end; margin: 0 0 14px; padding: 14px; border: 1px solid #d7def0; border-radius: 10px; background: #f7f9ff; }
 .reconciliation-filters label { margin: 0; color: #1b3277; }
 .reconciliation-filters input, .reconciliation-filters select { width: 100%; margin-top: 5px; padding: 9px 10px; border: 1px solid #cbd4e7; border-radius: 10px; background: #fff; color: var(--ink); font: inherit; }
 .reconciliation-filters select:focus { outline: none; border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12); }
@@ -126,7 +126,7 @@ th { background: #eef2ff; color: #324a91; }
   .topbar nav { height: 72px; gap: 14px; }
   main { padding-top: 38px; }
   .reconciliation-filters { grid-template-columns: 1fr 1fr; }
-  .reconciliation-filters label:nth-child(3), .reconciliation-filters .field-help { grid-column: 1 / -1; }
+  .reconciliation-filters label:nth-child(3), .reconciliation-filters label:nth-child(4), .reconciliation-filters .field-help { grid-column: 1 / -1; }
   .reconciliation-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 530px) {
@@ -137,6 +137,6 @@ th { background: #eef2ff; color: #324a91; }
   .reconciliation-kpis { grid-template-columns: 1fr 1fr; }
   .reconciliation-kpi:last-child { grid-column: span 2; }
   .reconciliation-filters { grid-template-columns: 1fr; }
-  .reconciliation-filters label:nth-child(3), .reconciliation-filters .field-help { grid-column: auto; }
+  .reconciliation-filters label:nth-child(3), .reconciliation-filters label:nth-child(4), .reconciliation-filters .field-help { grid-column: auto; }
   .reconciliation-filters .secondary-button { width: 100%; }
 }
