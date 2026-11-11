@@ -213,6 +213,16 @@
           <button id="assign-driver-button" class="primary-button" type="submit">Verificar y asignar</button>
         </form>
         <p id="driver-assignment-result" class="driver-assignment-result" aria-live="polite" hidden></p>
+        <div class="driver-assignment-log">
+          <div class="records-heading">
+            <div>
+              <p class="eyebrow">Seguimiento</p>
+              <h3>Bitácora de asignaciones</h3>
+              <p class="muted">Se muestran las últimas 50 verificaciones realizadas con Motive.</p>
+            </div>
+          </div>
+          <div class="table-wrap"><table class="driver-assignment-log-table"><thead><tr><th>Fecha</th><th>Unidad</th><th>Chofer anterior</th><th>Chofer solicitado</th><th>Realizado por</th><th>Resultado</th></tr></thead><tbody id="driver-assignment-log-body"><tr class="empty"><td colspan="6">Aún no hay asignaciones registradas.</td></tr></tbody></table></div>
+        </div>
       </section>
 
       <section id="unidades" class="card units-card" hidden>

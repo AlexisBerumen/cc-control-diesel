@@ -98,6 +98,20 @@ async function initializeDatabase() {
       id TEXT PRIMARY KEY, motive_driver_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, email TEXT,
       active BOOLEAN NOT NULL DEFAULT TRUE, motive_updated_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS driver_assignment_log (
+      log_id BIGSERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      unit_id TEXT NOT NULL REFERENCES units(id),
+      unit_number TEXT NOT NULL,
+      previous_driver_motive_id TEXT,
+      previous_driver_name TEXT,
+      new_driver_id TEXT REFERENCES drivers(id),
+      new_driver_name TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      actor_email TEXT,
+      status TEXT NOT NULL,
+      message TEXT NOT NULL
+    );
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_vehicle_id TEXT UNIQUE;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer NUMERIC(12,2);
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_unit TEXT;
@@ -141,6 +155,7 @@ async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS fuel_records_created_at_idx ON fuel_records (created_at DESC, record_id DESC);
     CREATE INDEX IF NOT EXISTS fuel_records_unit_odometer_idx ON fuel_records (unit_id, odometer DESC);
     CREATE INDEX IF NOT EXISTS motive_odometer_readings_unit_observed_at_idx ON motive_odometer_readings (unit_id, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS driver_assignment_log_created_at_idx ON driver_assignment_log (created_at DESC, log_id DESC);
     CREATE TABLE IF NOT EXISTS motive_connection (
       id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id), encrypted_access_token TEXT NOT NULL,
       encrypted_refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
@@ -150,9 +165,11 @@ async function initializeDatabase() {
       state TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL
     );
     CREATE TABLE IF NOT EXISTS admin_sessions (
-      token_hash TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'admin', expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      token_hash TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'admin', email TEXT, expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-    ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin';`);
+    ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin';
+    ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS email TEXT;
+    ALTER TABLE driver_assignment_log ADD COLUMN IF NOT EXISTS actor_email TEXT;`);
   for (const unit of loadSeedUnits()) await pool.query('INSERT INTO units (id, number, identifier, description) VALUES ($1, $2, $3, $4) ON CONFLICT (number) DO NOTHING', [unit.id, unit.number, unit.identifier, unit.description]);
   await pool.query(`INSERT INTO motive_odometer_readings (unit_id, odometer, odometer_unit, observed_at)
     SELECT id, motive_odometer, COALESCE(motive_odometer_unit, 'mi'), COALESCE(motive_odometer_updated_at, NOW())
@@ -203,7 +220,7 @@ function secureEquals(left, right) { const leftBuffer = Buffer.from(left || ''),
 async function getSession(request) {
   const token = parseCookies(request).admin_session;
   if (!token || !pool) return null;
-  const result = await pool.query("SELECT COALESCE(role, 'admin') AS role FROM admin_sessions WHERE token_hash = $1 AND expires_at > NOW()", [sessionHash(token)]);
+  const result = await pool.query("SELECT COALESCE(role, 'admin') AS role, email FROM admin_sessions WHERE token_hash = $1 AND expires_at > NOW()", [sessionHash(token)]);
   return result.rows[0] || null;
 }
 async function isAdmin(request) { return (await getSession(request))?.role === 'admin'; }
@@ -286,8 +303,9 @@ function permanentDriverIdFromVehicle(data) {
   return id === undefined || id === null || id === '' ? null : String(id);
 }
 async function synchronizeMotivePermanentDriver(unit, driver) {
-  if (!unit.motive_vehicle_id) return { status: 'pending', message: 'La unidad aun no esta vinculada con Motive. Se actualizara al sincronizarla.' };
-  if (!driver.motive_driver_id) return { status: 'pending', message: 'El chofer no tiene identificador de Motive.' };
+  let previousMotiveDriverId = unit.motive_permanent_driver_id || null;
+  if (!unit.motive_vehicle_id) return { status: 'pending', message: 'La unidad aun no esta vinculada con Motive. Se actualizara al sincronizarla.', previousMotiveDriverId };
+  if (!driver.motive_driver_id) return { status: 'pending', message: 'El chofer no tiene identificador de Motive.', previousMotiveDriverId };
   try {
     const accessToken = await getMotiveAccessToken();
     const headers = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' };
@@ -296,9 +314,10 @@ async function synchronizeMotivePermanentDriver(unit, driver) {
     const currentData = await readMotiveResponse(currentResponse);
     if (!currentResponse.ok) throw new Error(motiveErrorMessage(currentData, 'No fue posible consultar la unidad en Motive.'));
     const currentDriverId = permanentDriverIdFromVehicle(currentData);
+    previousMotiveDriverId = currentDriverId;
     if (currentDriverId === String(driver.motive_driver_id)) {
       await pool.query('UPDATE units SET motive_permanent_driver_id = $1 WHERE id = $2', [currentDriverId, unit.id]);
-      return { status: 'already_assigned', message: 'El chofer ya estaba asignado en Motive.' };
+      return { status: 'already_assigned', message: 'El chofer ya estaba asignado en Motive.', previousMotiveDriverId };
     }
     const updateResponse = await fetch(vehicleUrl, {
       method: 'PUT',
@@ -308,10 +327,10 @@ async function synchronizeMotivePermanentDriver(unit, driver) {
     const updateData = await readMotiveResponse(updateResponse);
     if (!updateResponse.ok) throw new Error(motiveErrorMessage(updateData, 'No fue posible actualizar el chofer en Motive.'));
     await pool.query('UPDATE units SET motive_permanent_driver_id = $1 WHERE id = $2', [String(driver.motive_driver_id), unit.id]);
-    return { status: 'updated', message: 'Chofer permanente actualizado en Motive.' };
+    return { status: 'updated', message: 'Chofer permanente actualizado en Motive.', previousMotiveDriverId };
   } catch (error) {
     console.error(`No fue posible sincronizar el chofer de la unidad ${unit.number} con Motive:`, error.message);
-    return { status: 'pending', message: `Pendiente de Motive: ${cleanText(error.message, 180) || 'error de conexion.'}` };
+    return { status: 'pending', message: `Pendiente de Motive: ${cleanText(error.message, 180) || 'error de conexion.'}`, previousMotiveDriverId };
   }
 }
 async function syncMotiveVehicles() {
@@ -485,7 +504,7 @@ async function handleApi(request, response, url) {
     if (!role) { sendJson(response, 401, { error: 'Correo o contraseña incorrectos.' }); return true; }
     const token = crypto.randomBytes(32).toString('base64url');
     await pool.query('DELETE FROM admin_sessions WHERE expires_at < NOW()');
-    await pool.query('INSERT INTO admin_sessions (token_hash, role, expires_at) VALUES ($1, $2, NOW() + INTERVAL \'12 hours\')', [sessionHash(token), role]);
+    await pool.query('INSERT INTO admin_sessions (token_hash, role, email, expires_at) VALUES ($1, $2, $3, NOW() + INTERVAL \'12 hours\')', [sessionHash(token), role, email]);
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Set-Cookie': `admin_session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=43200` });
     response.end(JSON.stringify({ authenticated: true, role })); return true;
   }
@@ -546,18 +565,32 @@ async function handleApi(request, response, url) {
     const result = await pool.query('SELECT id, motive_driver_id AS "motiveDriverId", name FROM drivers WHERE active = TRUE ORDER BY name');
     sendJson(response, 200, result.rows); return true;
   }
-  if (url.pathname === '/api/driver-assignments' && request.method === 'POST') {
+  if (url.pathname === '/api/driver-assignments' && request.method === 'GET') {
     if (!await requireStaff(request, response)) return true;
+    const result = await pool.query(`SELECT log_id AS id, created_at AS "createdAt", unit_number AS "unitNumber", previous_driver_name AS "previousDriverName", new_driver_name AS "newDriverName", actor_role AS "actorRole", actor_email AS "actorEmail", status, message
+      FROM driver_assignment_log ORDER BY created_at DESC, log_id DESC LIMIT 50`);
+    sendJson(response, 200, result.rows); return true;
+  }
+  if (url.pathname === '/api/driver-assignments' && request.method === 'POST') {
+    const session = await requireStaff(request, response);
+    if (!session) return true;
     const body = await readJson(request);
     const unitId = cleanText(body.unitId, 80), driverId = cleanText(body.driverId, 100);
     if (!unitId || !driverId) { sendJson(response, 400, { error: 'Selecciona una unidad y un chofer válidos.' }); return true; }
-    const unitResult = await pool.query('SELECT id, number, motive_vehicle_id FROM units WHERE id = $1', [unitId]);
+    const unitResult = await pool.query('SELECT id, number, motive_vehicle_id, motive_permanent_driver_id FROM units WHERE id = $1', [unitId]);
     const driverResult = await pool.query('SELECT id, name, motive_driver_id FROM drivers WHERE id = $1 AND active = TRUE', [driverId]);
     if (!unitResult.rowCount) { sendJson(response, 404, { error: 'La unidad seleccionada no existe.' }); return true; }
     if (!driverResult.rowCount) { sendJson(response, 404, { error: 'El chofer seleccionado no existe o está inactivo.' }); return true; }
     const unit = unitResult.rows[0], driver = driverResult.rows[0];
     const assignment = await synchronizeMotivePermanentDriver(unit, driver);
-    sendJson(response, 200, { unitNumber: unit.number, driverName: driver.name, ...assignment }); return true;
+    const previousDriverResult = assignment.previousMotiveDriverId
+      ? await pool.query('SELECT name FROM drivers WHERE motive_driver_id = $1', [assignment.previousMotiveDriverId])
+      : { rows: [] };
+    const previousDriverName = previousDriverResult.rows[0]?.name || null;
+    await pool.query(`INSERT INTO driver_assignment_log (unit_id, unit_number, previous_driver_motive_id, previous_driver_name, new_driver_id, new_driver_name, actor_role, actor_email, status, message)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, [unit.id, unit.number, assignment.previousMotiveDriverId, previousDriverName, driver.id, driver.name, session.role || 'staff', session.email || null, assignment.status, assignment.message]);
+    const { previousMotiveDriverId, ...assignmentResponse } = assignment;
+    sendJson(response, 200, { unitNumber: unit.number, driverName: driver.name, ...assignmentResponse }); return true;
   }
   if (url.pathname === '/api/evidence' && request.method === 'POST') {
     const body = await readJson(request, 12_000_000);

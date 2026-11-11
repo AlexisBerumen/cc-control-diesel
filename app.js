@@ -24,6 +24,7 @@ let activeRecordsRange = { from: '', to: '' };
 let recordsPagination = { page: 1, limit: 20, total: 0, totalPages: 1 };
 let reconciliationData = null;
 let reconciliationPage = 1;
+let driverAssignmentLog = [];
 let unitCatalogPage = 1;
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
@@ -203,6 +204,25 @@ function showDriverAssignmentResult(message, status) {
   result.hidden = false;
   result.className = `driver-assignment-result ${status}`;
 }
+function assignmentLogStatus(status) {
+  if (status === 'updated') return '<span class="status">Actualizado</span>';
+  if (status === 'already_assigned') return '<span class="status-neutral">Sin cambios</span>';
+  return '<span class="status-warning">Pendiente</span>';
+}
+function assignmentActorLabel(role) { return role === 'admin' ? 'Administradora' : 'Personal autorizado'; }
+function renderDriverAssignmentLog() {
+  const body = $('#driver-assignment-log-body');
+  body.innerHTML = driverAssignmentLog.length
+    ? driverAssignmentLog.map((entry) => `<tr><td>${new Date(entry.createdAt).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</td><td><strong>${esc(entry.unitNumber)}</strong></td><td>${esc(entry.previousDriverName || 'Sin asignación')}</td><td><strong>${esc(entry.newDriverName)}</strong></td><td>${esc(entry.actorEmail || assignmentActorLabel(entry.actorRole))}</td><td>${assignmentLogStatus(entry.status)}<br><small>${esc(entry.message)}</small></td></tr>`).join('')
+    : '<tr class="empty"><td colspan="6">Aún no hay asignaciones registradas.</td></tr>';
+}
+async function loadDriverAssignmentLog() {
+  const response = await fetch('/api/driver-assignments');
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No fue posible consultar la bitácora de asignaciones.');
+  driverAssignmentLog = data;
+  renderDriverAssignmentLog();
+}
 function reconciliationStatusText(row) {
   if (row.status === 'ready') return 'Datos completos';
   if (row.status === 'no_fuel_records') return 'Sin cargas en periodo';
@@ -340,6 +360,7 @@ $('#driver-assignment-form').addEventListener('submit', async (event) => {
     const prefix = data.status === 'already_assigned' ? 'Sin cambios: ' : data.status === 'updated' ? 'Asignación actualizada: ' : 'Pendiente: ';
     showDriverAssignmentResult(`${prefix}${data.message || 'La operación se completó.'}`, data.status === 'pending' ? 'pending' : 'success');
     showToast(data.status === 'updated' ? `Chofer actualizado en Motive para la unidad ${data.unitNumber}.` : data.message || 'Asignación verificada.');
+    try { await loadDriverAssignmentLog(); } catch { /* La asignación ya fue guardada; la bitácora se actualizará al recargar. */ }
   } catch (error) {
     showDriverAssignmentResult(error.message || 'No fue posible actualizar la asignación.', 'error');
   } finally { button.disabled = false; }
@@ -754,7 +775,7 @@ async function synchronizeWithDatabase() {
     renderDriverAssignmentOptions();
     if (admin) {
       if (!$('#reconciliation-date-from').value || !$('#reconciliation-date-to').value) setDefaultReconciliationRange();
-      await Promise.all([loadRecordsPage(1), loadReconciliation()]);
+      await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog()]);
     } else {
       records = [];
       recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
@@ -762,6 +783,8 @@ async function synchronizeWithDatabase() {
       renderRecords();
       reconciliationData = null;
       renderReconciliation();
+      driverAssignmentLog = [];
+      renderDriverAssignmentLog();
     }
     renderUnitCatalog(); updateReview();
   } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
@@ -801,6 +824,7 @@ $('#logout-button').addEventListener('click', async () => {
   records = [];
   recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
   reconciliationData = null;
+  driverAssignmentLog = [];
   localStorage.removeItem(STORAGE.records);
   setAdminInterface(false);
   renderRecords();
@@ -809,4 +833,4 @@ $('#logout-button').addEventListener('click', async () => {
   showToast('Sesión cerrada.');
 });
 
-setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); updateReview(); synchronizeWithDatabase();
+setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); updateReview(); synchronizeWithDatabase();
