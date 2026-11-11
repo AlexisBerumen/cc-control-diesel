@@ -619,6 +619,7 @@ function setAdminInterface(authenticated, role = null) {
   isAdmin = authenticated;
   userRole = authenticated ? role : null;
   $('#registros').hidden = !authenticated;
+  $('#records-link').hidden = !authenticated;
   $('#conciliacion').hidden = !authenticated;
   $('#unidades').hidden = !authenticated;
   $('#unit-form').hidden = role !== 'admin';
