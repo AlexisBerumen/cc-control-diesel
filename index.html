@@ -155,6 +155,13 @@
             <p class="muted">Compara las millas registradas por Motive contra los galones cargados en el mismo periodo.</p>
           </div>
         </div>
+        <div class="reconciliation-kpis" aria-label="Resumen de conciliación">
+          <div class="reconciliation-kpi"><span>Unidades consultadas</span><strong id="reconciliation-kpi-units">—</strong></div>
+          <div class="reconciliation-kpi"><span>Datos completos</span><strong id="reconciliation-kpi-ready">—</strong></div>
+          <div class="reconciliation-kpi"><span>Millas calculadas</span><strong id="reconciliation-kpi-miles">—</strong></div>
+          <div class="reconciliation-kpi"><span>Galones registrados</span><strong id="reconciliation-kpi-gallons">—</strong></div>
+          <div class="reconciliation-kpi"><span>MPG ponderado</span><strong id="reconciliation-kpi-mpg">—</strong></div>
+        </div>
         <div class="reconciliation-filters" aria-label="Filtrar conciliación">
           <label>Desde<input id="reconciliation-date-from" type="date" /></label>
           <label>Hasta<input id="reconciliation-date-to" type="date" /></label>
@@ -163,7 +170,8 @@
           <button id="clear-reconciliation-filter" class="filter-link" type="button">Últimos 7 días</button>
           <p id="reconciliation-summary" class="field-help">Selecciona un rango para consultar las lecturas disponibles.</p>
         </div>
-        <p class="reconciliation-tip"><strong>Importante:</strong> una unidad necesita al menos dos lecturas de odómetro de Motive dentro del rango para calcular sus millas.</p>
+        <p id="reconciliation-insight" class="reconciliation-insight">Consulta un periodo para ver el resumen de las unidades.</p>
+        <p class="reconciliation-tip"><strong>Cómo se calcula:</strong> millas Motive = odómetro final − odómetro inicial. MPG = millas Motive ÷ galones cargados. Una unidad necesita dos lecturas de Motive dentro del rango.</p>
         <div class="table-wrap"><table class="reconciliation-table"><thead><tr><th>Unidad</th><th>Odómetro inicial</th><th>Odómetro final</th><th>Millas Motive</th><th>Galones</th><th>MPG</th><th>Cargas</th><th>Estado</th></tr></thead><tbody id="reconciliation-body"><tr class="empty"><td colspan="8">Aún no hay una consulta de conciliación.</td></tr></tbody></table></div>
       </section>
 

@@ -159,26 +159,46 @@ function renderReconciliationUnitOptions() {
   select.value = units.some((unit) => unit.id === selected) ? selected : '';
 }
 function reconciliationStatus(row) {
-  if (row.status === 'ready') return '<span class="status">Listo para revisar</span>';
-  if (row.status === 'no_fuel_records') return '<span class="status-neutral">Sin cargas</span>';
+  if (row.status === 'ready') return '<span class="status">Datos completos</span>';
+  if (row.status === 'no_fuel_records') return '<span class="status-neutral">Sin cargas en periodo</span>';
   if (row.status === 'inconsistent_readings') return '<span class="status-warning">Revisar lecturas</span>';
-  return '<span class="status-muted">Faltan lecturas</span>';
+  return '<span class="status-muted">Faltan lecturas Motive</span>';
 }
 function valueOrDash(value, suffix = '') {
   return value === null || value === undefined || value === '' ? '—' : `${number(value)}${suffix}`;
 }
+function setReconciliationKpis(rows = []) {
+  const complete = rows.filter((row) => row.status === 'ready');
+  const rowsWithMiles = rows.filter((row) => row.miles !== null && row.miles !== undefined && Number.isFinite(Number(row.miles)) && Number(row.miles) >= 0);
+  const totalMiles = rowsWithMiles.reduce((total, row) => total + Number(row.miles), 0);
+  const totalGallons = rows.reduce((total, row) => total + Number(row.gallons || 0), 0);
+  const completeMiles = complete.reduce((total, row) => total + Number(row.miles), 0);
+  const completeGallons = complete.reduce((total, row) => total + Number(row.gallons), 0);
+  $('#reconciliation-kpi-units').textContent = rows.length ? number(rows.length) : '—';
+  $('#reconciliation-kpi-ready').textContent = rows.length ? number(complete.length) : '—';
+  $('#reconciliation-kpi-miles').textContent = rowsWithMiles.length ? `${number(totalMiles)} mi` : '—';
+  $('#reconciliation-kpi-gallons').textContent = rows.length ? `${number(totalGallons)} gal` : '—';
+  $('#reconciliation-kpi-mpg').textContent = completeGallons > 0 ? number(completeMiles / completeGallons) : '—';
+}
 function renderReconciliation(data = null) {
   const body = $('#reconciliation-body');
   const summary = $('#reconciliation-summary');
+  const insight = $('#reconciliation-insight');
   if (!data) {
     body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay una consulta de conciliación.</td></tr>';
     summary.textContent = 'Selecciona un rango para consultar las lecturas disponibles.';
+    insight.textContent = 'Consulta un periodo para ver el resumen de las unidades.';
+    setReconciliationKpis();
     return;
   }
   const rows = data.rows || [];
   body.innerHTML = rows.length ? rows.map((row) => `<tr class="reconciliation-${esc(row.status)}"><td><strong>${esc(row.unitNumber)}</strong><br><small>${esc(row.description || 'Sin descripción')}</small></td><td>${valueOrDash(row.odometerStart, ' mi')}</td><td>${valueOrDash(row.odometerEnd, ' mi')}</td><td>${valueOrDash(row.miles, ' mi')}</td><td>${valueOrDash(row.gallons, ' gal')}</td><td>${row.mpg === null || row.mpg === undefined ? '—' : number(row.mpg)}</td><td>${number(row.fuelLoadCount || 0)}</td><td>${reconciliationStatus(row)}</td></tr>`).join('') : '<tr class="empty"><td colspan="8">No hay unidades para el filtro seleccionado.</td></tr>';
   const totals = data.summary || {};
   summary.textContent = `${number(totals.totalUnits || 0)} unidad(es) · ${number(totals.ready || 0)} con cálculo disponible · ${number(totals.insufficientReadings || 0)} con lecturas insuficientes · ${number(totals.noFuelRecords || 0)} sin cargas.`;
+  insight.textContent = totals.ready
+    ? `El periodo ya tiene ${number(totals.ready)} unidad(es) con información completa para revisar consumo.`
+    : 'Aún no hay suficientes pares de lecturas en este rango. La información se completará conforme Motive siga sincronizando odómetros.';
+  setReconciliationKpis(rows);
 }
 async function loadReconciliation() {
   const from = $('#reconciliation-date-from').value;
