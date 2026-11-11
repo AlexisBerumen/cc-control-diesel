@@ -159,11 +159,18 @@ function renderReconciliationUnitOptions() {
   select.innerHTML = `<option value="">Todas las unidades</option>${units.map((unit) => `<option value="${esc(unit.id)}">${esc(unit.number)} · ${esc(unitDescription(unit))}</option>`).join('')}`;
   select.value = units.some((unit) => unit.id === selected) ? selected : '';
 }
+function reconciliationStatusText(row) {
+  if (row.status === 'ready') return 'Datos completos';
+  if (row.status === 'no_fuel_records') return 'Sin cargas en periodo';
+  if (row.status === 'inconsistent_readings') return 'Revisar lecturas';
+  return 'Faltan lecturas Motive';
+}
 function reconciliationStatus(row) {
-  if (row.status === 'ready') return '<span class="status">Datos completos</span>';
-  if (row.status === 'no_fuel_records') return '<span class="status-neutral">Sin cargas en periodo</span>';
-  if (row.status === 'inconsistent_readings') return '<span class="status-warning">Revisar lecturas</span>';
-  return '<span class="status-muted">Faltan lecturas Motive</span>';
+  const label = reconciliationStatusText(row);
+  if (row.status === 'ready') return `<span class="status">${label}</span>`;
+  if (row.status === 'no_fuel_records') return `<span class="status-neutral">${label}</span>`;
+  if (row.status === 'inconsistent_readings') return `<span class="status-warning">${label}</span>`;
+  return `<span class="status-muted">${label}</span>`;
 }
 function valueOrDash(value, suffix = '') {
   return value === null || value === undefined || value === '' ? '—' : `${number(value)}${suffix}`;
@@ -554,8 +561,44 @@ async function exportExcel() {
   } catch (error) { showToast(error.message || 'No fue posible exportar el Excel.'); }
   finally { button.disabled = false; }
 }
+function reconciliationExportRows() {
+  if (!reconciliationData) return [];
+  const from = $('#reconciliation-date-from').value;
+  const to = $('#reconciliation-date-to').value;
+  const rows = reconciliationRowsForView(reconciliationData.rows || []);
+  const headings = ['Desde', 'Hasta', 'Unidad', 'Descripción', 'Odómetro inicial (mi)', 'Odómetro final (mi)', 'Millas Motive', 'Galones', 'MPG', 'Cargas', 'Estado'];
+  return [headings, ...rows.map((row) => [from, to, row.unitNumber, row.description || '', row.odometerStart ?? '', row.odometerEnd ?? '', row.miles ?? '', row.gallons ?? '', row.mpg ?? '', row.fuelLoadCount ?? 0, reconciliationStatusText(row)])];
+}
+function exportReconciliationExcelFile(rows, from, to) {
+  const sheetRows = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => spreadsheetCell(value, `${spreadsheetColumn(columnIndex)}${rowIndex + 1}`, rowIndex > 0 && [4, 5, 6, 7, 8, 9].includes(columnIndex) ? 2 : 0, rowIndex > 0 && [4, 5, 6, 7, 8, 9].includes(columnIndex))).join('')}</row>`).join('');
+  const widths = [14, 14, 18, 32, 22, 20, 18, 14, 12, 12, 25].map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join('');
+  const files = [
+    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
+    ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Conciliación" sheetId="1" r:id="rId1"/></sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
+    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>'],
+    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths}</cols><sheetData>${sheetRows}</sheetData><autoFilter ref="A1:K${rows.length}"/></worksheet>`]
+  ];
+  downloadFile(xlsxZip(files), `conciliacion-motive-${from}-a-${to}.xlsx`);
+}
+function exportReconciliationExcel() {
+  const button = $('#export-reconciliation-excel');
+  const from = $('#reconciliation-date-from').value;
+  const to = $('#reconciliation-date-to').value;
+  if (!reconciliationData || reconciliationData.from !== from || reconciliationData.to !== to) { showToast('Primero presiona Consultar para actualizar la conciliación antes de exportar.'); return; }
+  const rows = reconciliationExportRows();
+  if (rows.length <= 1) { showToast('No hay unidades visibles para exportar. Cambia el filtro “Mostrar” o consulta otro periodo.'); return; }
+  button.disabled = true;
+  try {
+    exportReconciliationExcelFile(rows, from, to);
+    showToast('Excel de conciliación preparado.');
+  } catch (error) { showToast(error.message || 'No fue posible exportar la conciliación.'); }
+  finally { button.disabled = false; }
+}
 $('#export-csv').addEventListener('click', exportCsv);
 $('#export-excel').addEventListener('click', exportExcel);
+$('#export-reconciliation-excel').addEventListener('click', exportReconciliationExcel);
 
 $('#unit-form').addEventListener('submit', async (event) => {
   event.preventDefault();
