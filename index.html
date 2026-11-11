@@ -176,6 +176,11 @@
         <p id="reconciliation-insight" class="reconciliation-insight">Consulta un periodo para ver el resumen de las unidades.</p>
         <p class="reconciliation-tip"><strong>Cómo se calcula:</strong> millas Motive = odómetro final − odómetro inicial. MPG = millas Motive ÷ galones cargados. Una unidad necesita dos lecturas de Motive dentro del rango.</p>
         <div class="table-wrap"><table class="reconciliation-table"><thead><tr><th>Unidad</th><th>Odómetro inicial</th><th>Odómetro final</th><th>Millas Motive</th><th>Galones</th><th>MPG</th><th>Cargas</th><th>Estado</th></tr></thead><tbody id="reconciliation-body"><tr class="empty"><td colspan="8">Aún no hay una consulta de conciliación.</td></tr></tbody></table></div>
+        <div id="reconciliation-pagination" class="records-pagination" hidden aria-label="Paginación de conciliación">
+          <button id="reconciliation-previous-page" class="secondary-button" type="button">← Anterior</button>
+          <p id="reconciliation-page-summary" class="field-help" aria-live="polite"></p>
+          <button id="reconciliation-next-page" class="secondary-button" type="button">Siguiente →</button>
+        </div>
       </section>
 
       <section id="asignar-chofer" class="card driver-assignment-card" hidden>

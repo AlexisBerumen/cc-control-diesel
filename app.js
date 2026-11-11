@@ -23,10 +23,12 @@ let userRole = null;
 let activeRecordsRange = { from: '', to: '' };
 let recordsPagination = { page: 1, limit: 20, total: 0, totalPages: 1 };
 let reconciliationData = null;
+let reconciliationPage = 1;
 let unitCatalogPage = 1;
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
 const recordsPageSize = 20;
+const reconciliationPageSize = 20;
 const unitCatalogPageSize = 24;
 
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
@@ -230,6 +232,13 @@ function setReconciliationKpis(rows = []) {
   $('#reconciliation-kpi-gallons').textContent = rows.length ? `${number(totalGallons)} gal` : '—';
   $('#reconciliation-kpi-mpg').textContent = completeGallons > 0 ? number(completeMiles / completeGallons) : '—';
 }
+function updateReconciliationPagination(totalRows, page, totalPages) {
+  const controls = $('#reconciliation-pagination');
+  controls.hidden = totalRows <= reconciliationPageSize;
+  $('#reconciliation-previous-page').disabled = page <= 1;
+  $('#reconciliation-next-page').disabled = page >= totalPages;
+  $('#reconciliation-page-summary').textContent = `Página ${page} de ${totalPages}`;
+}
 function reconciliationRowsForView(rows) {
   const filter = $('#reconciliation-view-filter').value;
   if (filter === 'missing-readings') return rows.filter((row) => row.status === 'insufficient_readings');
@@ -245,24 +254,32 @@ function renderReconciliation(data = null) {
     summary.textContent = 'Selecciona un rango para consultar las lecturas disponibles.';
     insight.textContent = 'Consulta un periodo para ver el resumen de las unidades.';
     setReconciliationKpis();
+    $('#reconciliation-pagination').hidden = true;
     return;
   }
   const allRows = data.rows || [];
   const rows = reconciliationRowsForView(allRows);
-  body.innerHTML = rows.length ? rows.map((row) => `<tr class="reconciliation-${esc(row.status)}"><td><strong>${esc(row.unitNumber)}</strong><br><small>${esc(row.description || 'Sin descripción')}</small></td><td>${valueOrDash(row.odometerStart, ' mi')}</td><td>${valueOrDash(row.odometerEnd, ' mi')}</td><td>${valueOrDash(row.miles, ' mi')}</td><td>${valueOrDash(row.gallons, ' gal')}</td><td>${row.mpg === null || row.mpg === undefined ? '—' : number(row.mpg)}</td><td>${number(row.fuelLoadCount || 0)}</td><td>${reconciliationStatus(row)}</td></tr>`).join('') : '<tr class="empty"><td colspan="8">No hay unidades para el filtro seleccionado.</td></tr>';
+  const totalPages = Math.max(1, Math.ceil(rows.length / reconciliationPageSize));
+  reconciliationPage = Math.min(Math.max(1, reconciliationPage), totalPages);
+  const first = (reconciliationPage - 1) * reconciliationPageSize;
+  const visibleRows = rows.slice(first, first + reconciliationPageSize);
+  body.innerHTML = visibleRows.length ? visibleRows.map((row) => `<tr class="reconciliation-${esc(row.status)}"><td><strong>${esc(row.unitNumber)}</strong><br><small>${esc(row.description || 'Sin descripción')}</small></td><td>${valueOrDash(row.odometerStart, ' mi')}</td><td>${valueOrDash(row.odometerEnd, ' mi')}</td><td>${valueOrDash(row.miles, ' mi')}</td><td>${valueOrDash(row.gallons, ' gal')}</td><td>${row.mpg === null || row.mpg === undefined ? '—' : number(row.mpg)}</td><td>${number(row.fuelLoadCount || 0)}</td><td>${reconciliationStatus(row)}</td></tr>`).join('') : '<tr class="empty"><td colspan="8">No hay unidades para el filtro seleccionado.</td></tr>';
   const ready = rows.filter((row) => row.status === 'ready').length;
   const missing = rows.filter((row) => row.status === 'insufficient_readings').length;
   const withoutFuel = rows.filter((row) => row.status === 'no_fuel_records').length;
-  summary.textContent = `Mostrando ${number(rows.length)} de ${number(allRows.length)} unidad(es) · ${number(ready)} con datos completos · ${number(missing)} con lecturas insuficientes · ${number(withoutFuel)} sin cargas.`;
+  const range = rows.length ? `Mostrando ${number(first + 1)}–${number(first + visibleRows.length)} de ${number(rows.length)} unidad(es)` : 'No hay unidades para el filtro seleccionado';
+  summary.textContent = `${range} · ${number(ready)} con datos completos · ${number(missing)} con lecturas insuficientes · ${number(withoutFuel)} sin cargas.`;
   insight.textContent = ready
     ? `El periodo ya tiene ${number(ready)} unidad(es) con información completa para revisar consumo.`
     : 'Aún no hay suficientes pares de lecturas en este rango. La información se completará conforme Motive siga sincronizando odómetros.';
   setReconciliationKpis(rows);
+  updateReconciliationPagination(rows.length, reconciliationPage, totalPages);
 }
 async function loadReconciliation() {
   const from = $('#reconciliation-date-from').value;
   const to = $('#reconciliation-date-to').value;
   if (!from || !to || from > to) throw new Error('Selecciona un rango de fechas válido para la conciliación.');
+  reconciliationPage = 1;
   const params = new URLSearchParams({ from, to });
   if ($('#reconciliation-unit').value) params.set('unitId', $('#reconciliation-unit').value);
   const response = await fetch(`/api/reconciliation?${params.toString()}`);
@@ -279,7 +296,9 @@ $('#clear-reconciliation-filter').addEventListener('click', () => {
   void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.'));
 });
 $('#reconciliation-unit').addEventListener('change', () => void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.')));
-$('#reconciliation-view-filter').addEventListener('change', () => renderReconciliation(reconciliationData));
+$('#reconciliation-view-filter').addEventListener('change', () => { reconciliationPage = 1; renderReconciliation(reconciliationData); });
+$('#reconciliation-previous-page').addEventListener('click', () => { reconciliationPage = Math.max(1, reconciliationPage - 1); renderReconciliation(reconciliationData); });
+$('#reconciliation-next-page').addEventListener('click', () => { reconciliationPage += 1; renderReconciliation(reconciliationData); });
 $('#assignment-unit-search').addEventListener('input', () => {
   assignmentUnit = null;
   $('#assignment-selected-unit').hidden = true;
