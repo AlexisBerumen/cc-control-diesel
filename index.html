@@ -188,14 +188,22 @@
         </div>
         <form id="driver-assignment-form" class="driver-assignment-form">
           <div>
-            <label for="assignment-unit">Unidad</label>
-            <select id="assignment-unit" required><option value="">Selecciona una unidad</option></select>
-            <p class="field-help">Escribe el número de unidad para buscarla rápidamente.</p>
+            <label for="assignment-unit-search">Unidad</label>
+            <div class="autocomplete">
+              <input id="assignment-unit-search" type="text" autocomplete="off" placeholder="Escribe el número de unidad" />
+              <div id="assignment-unit-options" class="suggestions" role="listbox" hidden></div>
+            </div>
+            <p class="field-help">Escribe y toca la unidad correcta en la lista.</p>
+            <div id="assignment-selected-unit" class="unit-confirmation assignment-confirmation" hidden></div>
           </div>
           <div>
-            <label for="assignment-driver">Chofer</label>
-            <select id="assignment-driver" required><option value="">Selecciona un chofer</option></select>
-            <p class="field-help">Solo aparecen choferes activos registrados en Motive.</p>
+            <label for="assignment-driver-search">Chofer</label>
+            <div class="autocomplete">
+              <input id="assignment-driver-search" type="text" autocomplete="off" placeholder="Escribe el nombre del chofer" />
+              <div id="assignment-driver-options" class="suggestions" role="listbox" hidden></div>
+            </div>
+            <p class="field-help">Escribe y toca el chofer correcto en la lista.</p>
+            <div id="assignment-selected-driver" class="unit-confirmation assignment-confirmation" hidden></div>
           </div>
           <button id="assign-driver-button" class="primary-button" type="submit">Verificar y asignar</button>
         </form>

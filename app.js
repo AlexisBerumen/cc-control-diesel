@@ -15,6 +15,8 @@ try { localStorage.removeItem(STORAGE.records); } catch { /* Los registros sólo
 let drivers = load(STORAGE.drivers, []);
 let selectedUnit = null;
 let selectedDriver = null;
+let assignmentUnit = null;
+let assignmentDriver = null;
 let toastTimer;
 let isAdmin = false;
 let userRole = null;
@@ -159,15 +161,39 @@ function renderReconciliationUnitOptions() {
   select.innerHTML = `<option value="">Todas las unidades</option>${units.map((unit) => `<option value="${esc(unit.id)}">${esc(unit.number)} · ${esc(unitDescription(unit))}</option>`).join('')}`;
   select.value = units.some((unit) => unit.id === selected) ? selected : '';
 }
+function setAssignmentUnit(unit) {
+  assignmentUnit = unit;
+  $('#assignment-unit-search').value = unit.number;
+  $('#assignment-unit-options').hidden = true;
+  $('#assignment-selected-unit').hidden = false;
+  $('#assignment-selected-unit').innerHTML = `<span>✓</span><div><strong>Unidad ${esc(unit.number)} seleccionada</strong><br><small>${esc(unitDescription(unit))}</small></div>`;
+}
+function setAssignmentDriver(driver) {
+  assignmentDriver = driver;
+  $('#assignment-driver-search').value = driver.name;
+  $('#assignment-driver-options').hidden = true;
+  $('#assignment-selected-driver').hidden = false;
+  $('#assignment-selected-driver').innerHTML = `<span>✓</span><div><strong>${esc(driver.name)} seleccionado</strong><br><small>Chofer registrado en Motive</small></div>`;
+}
+function updateAssignmentUnitSuggestions() {
+  const query = $('#assignment-unit-search').value.trim().toLowerCase();
+  const panel = $('#assignment-unit-options');
+  if (!query) { panel.hidden = true; return; }
+  const matches = units.filter((unit) => unit.number.toLowerCase().includes(query)).slice(0, 8);
+  panel.innerHTML = matches.length ? matches.map((unit) => `<button class="suggestion" type="button" data-assignment-unit-id="${esc(unit.id)}"><strong>Unidad ${esc(unit.number)}</strong><small>${esc(unitDescription(unit))}</small></button>`).join('') : supportSuggestion('unidad');
+  panel.hidden = false;
+}
+function updateAssignmentDriverSuggestions() {
+  const query = $('#assignment-driver-search').value.trim().toLowerCase();
+  const panel = $('#assignment-driver-options');
+  if (!query) { panel.hidden = true; return; }
+  const matches = drivers.filter((driver) => driver.name.toLowerCase().includes(query)).slice(0, 8);
+  panel.innerHTML = matches.length ? matches.map((driver) => `<button class="suggestion" type="button" data-assignment-driver-id="${esc(driver.id)}"><strong>${esc(driver.name)}</strong><small>Chofer registrado en Motive</small></button>`).join('') : supportSuggestion('chofer');
+  panel.hidden = false;
+}
 function renderDriverAssignmentOptions() {
-  const unitSelect = $('#assignment-unit');
-  const driverSelect = $('#assignment-driver');
-  const selectedUnit = unitSelect.value;
-  const selectedDriver = driverSelect.value;
-  unitSelect.innerHTML = `<option value="">Selecciona una unidad</option>${units.map((unit) => `<option value="${esc(unit.id)}">${esc(unit.number)} · ${esc(unitDescription(unit))}</option>`).join('')}`;
-  driverSelect.innerHTML = `<option value="">Selecciona un chofer</option>${drivers.map((driver) => `<option value="${esc(driver.id)}">${esc(driver.name)}</option>`).join('')}`;
-  unitSelect.value = units.some((unit) => unit.id === selectedUnit) ? selectedUnit : '';
-  driverSelect.value = drivers.some((driver) => driver.id === selectedDriver) ? selectedDriver : '';
+  if (assignmentUnit && !units.some((unit) => String(unit.id) === String(assignmentUnit.id))) { assignmentUnit = null; $('#assignment-unit-search').value = ''; $('#assignment-selected-unit').hidden = true; }
+  if (assignmentDriver && !drivers.some((driver) => String(driver.id) === String(assignmentDriver.id))) { assignmentDriver = null; $('#assignment-driver-search').value = ''; $('#assignment-selected-driver').hidden = true; }
 }
 function showDriverAssignmentResult(message, status) {
   const result = $('#driver-assignment-result');
@@ -254,14 +280,36 @@ $('#clear-reconciliation-filter').addEventListener('click', () => {
 });
 $('#reconciliation-unit').addEventListener('change', () => void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.')));
 $('#reconciliation-view-filter').addEventListener('change', () => renderReconciliation(reconciliationData));
+$('#assignment-unit-search').addEventListener('input', () => {
+  assignmentUnit = null;
+  $('#assignment-selected-unit').hidden = true;
+  $('#driver-assignment-result').hidden = true;
+  updateAssignmentUnitSuggestions();
+});
+$('#assignment-driver-search').addEventListener('input', () => {
+  assignmentDriver = null;
+  $('#assignment-selected-driver').hidden = true;
+  $('#driver-assignment-result').hidden = true;
+  updateAssignmentDriverSuggestions();
+});
+$('#assignment-unit-options').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-assignment-unit-id]');
+  const unit = button && units.find((item) => String(item.id) === button.dataset.assignmentUnitId);
+  if (unit) setAssignmentUnit(unit);
+});
+$('#assignment-driver-options').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-assignment-driver-id]');
+  const driver = button && drivers.find((item) => String(item.id) === button.dataset.assignmentDriverId);
+  if (driver) setAssignmentDriver(driver);
+});
 $('#driver-assignment-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const unitId = $('#assignment-unit').value;
-  const driverId = $('#assignment-driver').value;
-  if (!unitId || !driverId) { showDriverAssignmentResult('Selecciona una unidad y un chofer antes de continuar.', 'error'); return; }
-  const unit = units.find((item) => item.id === unitId);
-  const driver = drivers.find((item) => item.id === driverId);
-  if (!unit || !driver) { showDriverAssignmentResult('La unidad o el chofer seleccionado ya no están disponibles. Actualiza la página e inténtalo de nuevo.', 'error'); return; }
+  const unit = assignmentUnit;
+  const driver = assignmentDriver;
+  if (!unit || !driver) { showDriverAssignmentResult('Selecciona una unidad y un chofer desde las listas antes de continuar.', 'error'); return; }
+  const unitId = unit.id;
+  const driverId = driver.id;
+  if (!units.some((item) => String(item.id) === String(unitId)) || !drivers.some((item) => String(item.id) === String(driverId))) { showDriverAssignmentResult('La unidad o el chofer seleccionado ya no están disponibles. Actualiza la página e inténtalo de nuevo.', 'error'); return; }
   if (!confirm(`Se verificará en Motive la asignación de ${driver.name} a la unidad ${unit.number}. ¿Deseas continuar?`)) return;
   const button = $('#assign-driver-button');
   button.disabled = true;

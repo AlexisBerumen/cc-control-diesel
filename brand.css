@@ -124,8 +124,8 @@ th { background: #eef2ff; color: #324a91; }
 .reconciliation-inconsistent_readings td { background: #fff9e4; }
 .driver-assignment-form { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto; gap: 14px; align-items: end; padding: 17px; border: 1px solid #d7def0; border-radius: 11px; background: #f7f9ff; }
 .driver-assignment-form label { margin: 0; }
-.driver-assignment-form select { width: 100%; margin-top: 5px; padding: 10px; border: 1px solid #cbd4e7; border-radius: 10px; background: #fff; color: var(--ink); font: inherit; }
-.driver-assignment-form select:focus { outline: none; border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12); }
+.driver-assignment-form input, .driver-assignment-form select { width: 100%; margin-top: 5px; padding: 10px; border: 1px solid #cbd4e7; border-radius: 10px; background: #fff; color: var(--ink); font: inherit; }
+.driver-assignment-form input:focus, .driver-assignment-form select:focus { outline: none; border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12); }
 .driver-assignment-form .primary-button { min-height: 44px; white-space: nowrap; }
 .driver-assignment-form .primary-button:disabled { cursor: wait; opacity: .65; }
 .driver-assignment-result { margin: 14px 0 0; padding: 12px 14px; border-radius: 9px; font-size: 13px; font-weight: 700; line-height: 1.4; }
