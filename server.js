@@ -103,6 +103,15 @@ async function initializeDatabase() {
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_unit TEXT;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_updated_at TIMESTAMPTZ;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_permanent_driver_id TEXT;
+    CREATE TABLE IF NOT EXISTS motive_odometer_readings (
+      reading_id BIGSERIAL PRIMARY KEY,
+      unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+      odometer NUMERIC(12,2) NOT NULL CHECK (odometer > 0),
+      odometer_unit TEXT NOT NULL DEFAULT 'mi',
+      observed_at TIMESTAMPTZ NOT NULL,
+      captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (unit_id, observed_at)
+    );
     ALTER TABLE fuel_records ALTER COLUMN amount DROP NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_amount_check;
     ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_amount_check CHECK (amount IS NULL OR amount > 0);
@@ -131,6 +140,7 @@ async function initializeDatabase() {
     ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_gallons_check CHECK (gallons > 0 AND gallons <= 300);
     CREATE INDEX IF NOT EXISTS fuel_records_created_at_idx ON fuel_records (created_at DESC, record_id DESC);
     CREATE INDEX IF NOT EXISTS fuel_records_unit_odometer_idx ON fuel_records (unit_id, odometer DESC);
+    CREATE INDEX IF NOT EXISTS motive_odometer_readings_unit_observed_at_idx ON motive_odometer_readings (unit_id, observed_at DESC);
     CREATE TABLE IF NOT EXISTS motive_connection (
       id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id), encrypted_access_token TEXT NOT NULL,
       encrypted_refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
@@ -144,6 +154,10 @@ async function initializeDatabase() {
     );
     ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin';`);
   for (const unit of loadSeedUnits()) await pool.query('INSERT INTO units (id, number, identifier, description) VALUES ($1, $2, $3, $4) ON CONFLICT (number) DO NOTHING', [unit.id, unit.number, unit.identifier, unit.description]);
+  await pool.query(`INSERT INTO motive_odometer_readings (unit_id, odometer, odometer_unit, observed_at)
+    SELECT id, motive_odometer, COALESCE(motive_odometer_unit, 'mi'), COALESCE(motive_odometer_updated_at, NOW())
+    FROM units WHERE motive_odometer IS NOT NULL AND motive_odometer > 0
+    ON CONFLICT (unit_id, observed_at) DO NOTHING`);
   databaseReady = true;
   console.log('PostgreSQL conectado y catálogo de unidades preparado.');
 }
@@ -352,7 +366,7 @@ async function gpsInventoryReport() {
 }
 async function syncMotiveVehiclesInternal() {
   const accessToken = await getMotiveAccessToken();
-  let page = 1, total = Infinity, matched = 0, received = 0, vehiclesFound = 0, missingNumber = 0, missingOdometer = 0, responseShape = [], motiveEndpoint = 'v2';
+  let page = 1, total = Infinity, matched = 0, received = 0, vehiclesFound = 0, missingNumber = 0, missingOdometer = 0, odometerReadingsSaved = 0, responseShape = [], motiveEndpoint = 'v2';
   while ((page - 1) * 100 < total) {
     let response = await fetch(`https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=${page}`, { headers: { Authorization: `Bearer ${accessToken}`, 'X-Metric-Units': 'false', 'X-Time-Zone': 'America/Mexico_City' } });
     let data = await response.json();
@@ -378,8 +392,17 @@ async function syncMotiveVehiclesInternal() {
       const reading = location.true_odometer ?? location.odometer ?? vehicleDetails.true_odometer ?? vehicleDetails.odometer;
       if (!number) { missingNumber += 1; continue; }
       if (!Number.isFinite(Number(reading))) { missingOdometer += 1; continue; }
-      const updated = await pool.query('UPDATE units SET motive_vehicle_id = $1, motive_odometer = $2, motive_odometer_unit = $3, motive_odometer_updated_at = $4 WHERE LOWER(number) = LOWER($5)', [String(vehicleDetails.id || vehicle.id), Number(reading), 'mi', location.located_at || new Date().toISOString(), number]);
-      if (updated.rowCount) matched += 1;
+      const motiveTimestamp = new Date(location.located_at || location.updated_at || vehicleDetails.updated_at || Date.now());
+      const observedAt = Number.isFinite(motiveTimestamp.getTime()) ? motiveTimestamp.toISOString() : new Date().toISOString();
+      const updated = await pool.query('UPDATE units SET motive_vehicle_id = $1, motive_odometer = $2, motive_odometer_unit = $3, motive_odometer_updated_at = $4 WHERE LOWER(number) = LOWER($5) RETURNING id', [String(vehicleDetails.id || vehicle.id), Number(reading), 'mi', observedAt, number]);
+      if (updated.rowCount) {
+        matched += 1;
+        const history = await pool.query(`INSERT INTO motive_odometer_readings (unit_id, odometer, odometer_unit, observed_at)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (unit_id, observed_at) DO UPDATE SET odometer = EXCLUDED.odometer, odometer_unit = EXCLUDED.odometer_unit, captured_at = NOW()
+          RETURNING reading_id`, [updated.rows[0].id, Number(reading), 'mi', observedAt]);
+        if (history.rowCount) odometerReadingsSaved += 1;
+      }
       received += 1;
     }
     if (!vehicles.length) break;
@@ -389,7 +412,7 @@ async function syncMotiveVehiclesInternal() {
   try { driverSync = await syncMotiveDrivers(accessToken); }
   catch (error) { driverSync = { driversReceived: 0, driversSynced: 0, driverSyncError: error.message }; }
   await pool.query('UPDATE motive_connection SET last_synced_at = NOW() WHERE id = TRUE');
-  return { vehiclesReceived: vehiclesFound, vehiclesWithOdometer: received, unitsMatched: matched, unitsWithoutMatch: Math.max(received - matched, 0), missingNumber, missingOdometer, motiveEndpoint, motiveResponseFields: responseShape, ...driverSync };
+  return { vehiclesReceived: vehiclesFound, vehiclesWithOdometer: received, unitsMatched: matched, unitsWithoutMatch: Math.max(received - matched, 0), missingNumber, missingOdometer, odometerReadingsSaved, motiveEndpoint, motiveResponseFields: responseShape, ...driverSync };
 }
 
 async function syncMotiveDrivers(accessToken) {
