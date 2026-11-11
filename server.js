@@ -190,6 +190,13 @@ function recordsDateFilter(url) {
   }
   return { from, to, values, where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '' };
 }
+function reconciliationDateFilter(url) {
+  const from = url.searchParams.get('from') || '';
+  const to = url.searchParams.get('to') || '';
+  const unitId = cleanText(url.searchParams.get('unitId') || '', 80);
+  if (!from || !to || !isIsoDate(from) || !isIsoDate(to) || from > to) throw new Error('Selecciona un rango de fechas válido para la conciliación.');
+  return { from, to, unitId };
+}
 function parseCookies(request) { return Object.fromEntries((request.headers.cookie || '').split(';').map((part) => { const index = part.indexOf('='); return index < 0 ? [] : [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1))]; }).filter((part) => part.length)); }
 function sessionHash(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 function secureEquals(left, right) { const leftBuffer = Buffer.from(left || ''), rightBuffer = Buffer.from(right || ''); return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer); }
@@ -573,6 +580,67 @@ async function handleApi(request, response, url) {
     sendJson(response, 200, {
       records: result.rows,
       pagination: { page, limit, total, totalPages, from: filter.from || null, to: filter.to || null, exportTruncated: exportAll && total > maxRecordsExport }
+    }); return true;
+  }
+  if (url.pathname === '/api/reconciliation' && request.method === 'GET') {
+    if (!await requireStaff(request, response)) return true;
+    let filter;
+    try { filter = reconciliationDateFilter(url); }
+    catch (error) { sendJson(response, 400, { error: error.message }); return true; }
+    const values = [filter.from, businessTimeZone, filter.to, businessTimeZone];
+    const unitWhere = filter.unitId ? `WHERE u.id = $${values.push(filter.unitId)}` : '';
+    const result = await pool.query(`
+      WITH period_bounds AS (
+        SELECT ($1::date::timestamp AT TIME ZONE $2) AS starts_at,
+               ((($3::date + 1)::timestamp) AT TIME ZONE $4) AS ends_at
+      ), motive_readings AS (
+        SELECT r.unit_id,
+               COUNT(*)::integer AS reading_count,
+               (array_agg(r.odometer ORDER BY r.observed_at ASC))[1] AS odometer_start,
+               (array_agg(r.observed_at ORDER BY r.observed_at ASC))[1] AS odometer_start_at,
+               (array_agg(r.odometer ORDER BY r.observed_at DESC))[1] AS odometer_end,
+               (array_agg(r.observed_at ORDER BY r.observed_at DESC))[1] AS odometer_end_at
+        FROM motive_odometer_readings r
+        CROSS JOIN period_bounds b
+        WHERE r.observed_at >= b.starts_at AND r.observed_at < b.ends_at
+        GROUP BY r.unit_id
+      ), fuel_totals AS (
+        SELECT f.unit_id, COUNT(*)::integer AS fuel_load_count, COALESCE(SUM(f.gallons), 0) AS gallons
+        FROM fuel_records f
+        CROSS JOIN period_bounds b
+        WHERE f.created_at >= b.starts_at AND f.created_at < b.ends_at
+        GROUP BY f.unit_id
+      )
+      SELECT u.id AS "unitId", u.number AS "unitNumber", u.description,
+             COALESCE(r.reading_count, 0) AS "readingCount", r.odometer_start AS "odometerStart",
+             r.odometer_start_at AS "odometerStartAt", r.odometer_end AS "odometerEnd",
+             r.odometer_end_at AS "odometerEndAt", COALESCE(f.gallons, 0) AS gallons,
+             COALESCE(f.fuel_load_count, 0) AS "fuelLoadCount"
+      FROM units u
+      LEFT JOIN motive_readings r ON r.unit_id = u.id
+      LEFT JOIN fuel_totals f ON f.unit_id = u.id
+      ${unitWhere}
+      ORDER BY u.number`, values);
+    const rows = result.rows.map((row) => {
+      const readingCount = Number(row.readingCount || 0);
+      const odometerStart = row.odometerStart === null ? null : Number(row.odometerStart);
+      const odometerEnd = row.odometerEnd === null ? null : Number(row.odometerEnd);
+      const gallons = Number(row.gallons || 0);
+      const miles = readingCount >= 2 && Number.isFinite(odometerStart) && Number.isFinite(odometerEnd) ? odometerEnd - odometerStart : null;
+      const mpg = miles !== null && miles >= 0 && gallons > 0 ? miles / gallons : null;
+      const status = miles === null ? 'insufficient_readings' : miles < 0 ? 'inconsistent_readings' : gallons <= 0 ? 'no_fuel_records' : 'ready';
+      return { ...row, readingCount, odometerStart, odometerEnd, gallons, miles, mpg, status };
+    });
+    sendJson(response, 200, {
+      from: filter.from,
+      to: filter.to,
+      rows,
+      summary: {
+        totalUnits: rows.length,
+        ready: rows.filter((row) => row.status === 'ready').length,
+        insufficientReadings: rows.filter((row) => row.status === 'insufficient_readings').length,
+        noFuelRecords: rows.filter((row) => row.status === 'no_fuel_records').length
+      }
     }); return true;
   }
   if (url.pathname === '/api/records' && request.method === 'POST') {

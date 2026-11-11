@@ -141,6 +141,63 @@ function renderRecords() {
   updateRecordsFilterSummary();
   updateRecordsPagination();
 }
+function isoDateInMexico(date) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+function setDefaultReconciliationRange() {
+  const today = new Date();
+  const start = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
+  $('#reconciliation-date-from').value = isoDateInMexico(start);
+  $('#reconciliation-date-to').value = isoDateInMexico(today);
+}
+function renderReconciliationUnitOptions() {
+  const select = $('#reconciliation-unit');
+  const selected = select.value;
+  select.innerHTML = `<option value="">Todas las unidades</option>${units.map((unit) => `<option value="${esc(unit.id)}">${esc(unit.number)} · ${esc(unitDescription(unit))}</option>`).join('')}`;
+  select.value = units.some((unit) => unit.id === selected) ? selected : '';
+}
+function reconciliationStatus(row) {
+  if (row.status === 'ready') return '<span class="status">Listo para revisar</span>';
+  if (row.status === 'no_fuel_records') return '<span class="status-neutral">Sin cargas</span>';
+  if (row.status === 'inconsistent_readings') return '<span class="status-warning">Revisar lecturas</span>';
+  return '<span class="status-muted">Faltan lecturas</span>';
+}
+function valueOrDash(value, suffix = '') {
+  return value === null || value === undefined || value === '' ? '—' : `${number(value)}${suffix}`;
+}
+function renderReconciliation(data = null) {
+  const body = $('#reconciliation-body');
+  const summary = $('#reconciliation-summary');
+  if (!data) {
+    body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay una consulta de conciliación.</td></tr>';
+    summary.textContent = 'Selecciona un rango para consultar las lecturas disponibles.';
+    return;
+  }
+  const rows = data.rows || [];
+  body.innerHTML = rows.length ? rows.map((row) => `<tr class="reconciliation-${esc(row.status)}"><td><strong>${esc(row.unitNumber)}</strong><br><small>${esc(row.description || 'Sin descripción')}</small></td><td>${valueOrDash(row.odometerStart, ' mi')}</td><td>${valueOrDash(row.odometerEnd, ' mi')}</td><td>${valueOrDash(row.miles, ' mi')}</td><td>${valueOrDash(row.gallons, ' gal')}</td><td>${row.mpg === null || row.mpg === undefined ? '—' : number(row.mpg)}</td><td>${number(row.fuelLoadCount || 0)}</td><td>${reconciliationStatus(row)}</td></tr>`).join('') : '<tr class="empty"><td colspan="8">No hay unidades para el filtro seleccionado.</td></tr>';
+  const totals = data.summary || {};
+  summary.textContent = `${number(totals.totalUnits || 0)} unidad(es) · ${number(totals.ready || 0)} con cálculo disponible · ${number(totals.insufficientReadings || 0)} con lecturas insuficientes · ${number(totals.noFuelRecords || 0)} sin cargas.`;
+}
+async function loadReconciliation() {
+  const from = $('#reconciliation-date-from').value;
+  const to = $('#reconciliation-date-to').value;
+  if (!from || !to || from > to) throw new Error('Selecciona un rango de fechas válido para la conciliación.');
+  const params = new URLSearchParams({ from, to });
+  if ($('#reconciliation-unit').value) params.set('unitId', $('#reconciliation-unit').value);
+  const response = await fetch(`/api/reconciliation?${params.toString()}`);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No fue posible consultar la conciliación.');
+  renderReconciliation(data);
+}
+$('#apply-reconciliation-filter').addEventListener('click', () => void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.')));
+$('#clear-reconciliation-filter').addEventListener('click', () => {
+  setDefaultReconciliationRange();
+  $('#reconciliation-unit').value = '';
+  void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.'));
+});
+$('#reconciliation-unit').addEventListener('change', () => void loadReconciliation().catch((error) => showToast(error.message || 'No fue posible consultar la conciliación.')));
 async function applyRecordsFilter() {
   const from = $('#records-date-from').value;
   const to = $('#records-date-to').value;
@@ -486,8 +543,10 @@ function setAdminInterface(authenticated, role = null) {
   isAdmin = authenticated;
   userRole = authenticated ? role : null;
   $('#registros').hidden = !authenticated;
+  $('#conciliacion').hidden = !authenticated;
   $('#unidades').hidden = !authenticated;
   $('#unit-form').hidden = role !== 'admin';
+  $('#reconciliation-link').hidden = !authenticated;
   $('#units-link').hidden = !authenticated;
   $('#login-button').hidden = authenticated;
   $('#logout-button').hidden = !authenticated;
@@ -506,13 +565,16 @@ async function synchronizeWithDatabase() {
     const [unitsResponse, driversResponse] = await Promise.all([fetch('/api/units'), fetch('/api/drivers')]);
     if (unitsResponse.ok) { units = await unitsResponse.json(); save(STORAGE.units, units); }
     if (driversResponse.ok) { drivers = await driversResponse.json(); save(STORAGE.drivers, drivers); }
+    renderReconciliationUnitOptions();
     if (admin) {
-      await loadRecordsPage(1);
+      if (!$('#reconciliation-date-from').value || !$('#reconciliation-date-to').value) setDefaultReconciliationRange();
+      await Promise.all([loadRecordsPage(1), loadReconciliation()]);
     } else {
       records = [];
       recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
       localStorage.removeItem(STORAGE.records);
       renderRecords();
+      renderReconciliation();
     }
     renderUnitCatalog(); updateReview();
   } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
@@ -554,8 +616,9 @@ $('#logout-button').addEventListener('click', async () => {
   localStorage.removeItem(STORAGE.records);
   setAdminInterface(false);
   renderRecords();
+  renderReconciliation();
   location.hash = '#registro';
   showToast('Sesión cerrada.');
 });
 
-setAdminInterface(false); renderUnitCatalog(); renderRecords(); updateReview(); synchronizeWithDatabase();
+setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderRecords(); renderReconciliation(); updateReview(); synchronizeWithDatabase();
