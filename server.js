@@ -391,7 +391,7 @@ async function syncMotiveVehiclesInternal() {
       const number = vehicleDetails.number || vehicle.number || vehicleDetails.vehicle_number || vehicle.vehicle_number;
       const reading = location.true_odometer ?? location.odometer ?? vehicleDetails.true_odometer ?? vehicleDetails.odometer;
       if (!number) { missingNumber += 1; continue; }
-      if (!Number.isFinite(Number(reading))) { missingOdometer += 1; continue; }
+      if (!Number.isFinite(Number(reading)) || Number(reading) <= 0) { missingOdometer += 1; continue; }
       const motiveTimestamp = new Date(location.located_at || location.updated_at || vehicleDetails.updated_at || Date.now());
       const observedAt = Number.isFinite(motiveTimestamp.getTime()) ? motiveTimestamp.toISOString() : new Date().toISOString();
       const updated = await pool.query('UPDATE units SET motive_vehicle_id = $1, motive_odometer = $2, motive_odometer_unit = $3, motive_odometer_updated_at = $4 WHERE LOWER(number) = LOWER($5) RETURNING id', [String(vehicleDetails.id || vehicle.id), Number(reading), 'mi', observedAt, number]);
