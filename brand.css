@@ -12,6 +12,8 @@
   --shadow: 0 16px 38px rgba(19, 36, 91, .12);
 }
 
+[hidden] { display: none !important; }
+
 body { background: radial-gradient(circle at 6% 0%, #e7edff 0, transparent 30rem), var(--sand); }
 .topbar { min-height: 84px; background: linear-gradient(112deg, #0d1743 0%, #172d78 63%, #1a347f 100%); border-top: 4px solid #dc2638; box-shadow: 0 6px 20px rgba(13, 23, 67, .22); }
 .topbar nav { height: 80px; gap: 26px; }
