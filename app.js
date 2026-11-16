@@ -28,6 +28,9 @@ let driverAssignmentLog = [];
 let fuelInventory = [];
 let fuelPurchases = [];
 let fuelInventoryMovements = [];
+let personnelReports = [];
+let personnelSelectedDriver = null;
+let personnelSelectedUnit = null;
 let unitCatalogPage = 1;
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
@@ -292,6 +295,86 @@ async function loadDriverAssignmentLog() {
   driverAssignmentLog = data;
   renderDriverAssignmentLog();
 }
+function personnelMovementLabel(type) {
+  return ({ onboarding: 'Alta de chofer', offboarding: 'Baja de chofer', temporary_assignment: 'Cambio temporal', permanent_assignment: 'Cambio permanente', unreported_change: 'Movimiento no notificado', weekly_review: 'Confirmación semanal' })[type] || 'Movimiento';
+}
+function personnelStatusLabel(status) {
+  return ({ pending: 'Pendiente', reviewed: 'Revisado', approved: 'Aprobado' })[status] || 'Pendiente';
+}
+function personnelStatusBadge(status) {
+  const className = status === 'approved' ? 'status' : status === 'reviewed' ? 'status-neutral' : 'status-warning';
+  return `<span class="${className}">${personnelStatusLabel(status)}</span>`;
+}
+function setPersonnelDriver(driver) {
+  personnelSelectedDriver = driver;
+  $('#personnel-driver-search').value = driver.name;
+  $('#personnel-driver-options').hidden = true;
+  $('#personnel-selected-driver').hidden = false;
+  $('#personnel-selected-driver').innerHTML = `<span>✓</span><div><strong>${esc(driver.name)} seleccionado</strong><br><small>Chofer registrado en Motive</small></div>`;
+}
+function setPersonnelUnit(unit) {
+  personnelSelectedUnit = unit;
+  $('#personnel-unit-search').value = unit.number;
+  $('#personnel-unit-options').hidden = true;
+  $('#personnel-selected-unit').hidden = false;
+  $('#personnel-selected-unit').innerHTML = `<span>✓</span><div><strong>Unidad ${esc(unit.number)} seleccionada</strong><br><small>${esc(unitDescription(unit))}</small></div>`;
+}
+function personnelMissingSuggestion(kind) {
+  const label = kind === 'chofer' ? 'chofer' : 'unidad';
+  const message = kind === 'chofer'
+    ? 'El chofer no aparece en Motive. Puedes escribir su nombre para dejar el reporte y solicitar apoyo.'
+    : 'La unidad no aparece en el catálogo. Puedes escribir el número para dejar el reporte y solicitar apoyo.';
+  return `<div class="suggestion personnel-manual-suggestion"><strong>${esc(message)}</strong><a href="https://wa.me/526183249678?text=${encodeURIComponent(`Hola, necesito apoyo porque la ${label} no aparece en Motive para un reporte semanal.`)}" target="_blank" rel="noopener">Contactar soporte por WhatsApp</a></div>`;
+}
+function updatePersonnelDriverSuggestions() {
+  const query = $('#personnel-driver-search').value.trim().toLowerCase();
+  const panel = $('#personnel-driver-options');
+  if (!query) { panel.hidden = true; return; }
+  const matches = drivers.filter((driver) => driver.name.toLowerCase().includes(query)).slice(0, 8);
+  panel.innerHTML = matches.length ? matches.map((driver) => `<button class="suggestion" type="button" data-personnel-driver-id="${esc(driver.id)}"><strong>${esc(driver.name)}</strong><small>Chofer registrado en Motive</small></button>`).join('') : personnelMissingSuggestion('chofer');
+  panel.hidden = false;
+}
+function updatePersonnelUnitSuggestions() {
+  const query = $('#personnel-unit-search').value.trim().toLowerCase();
+  const panel = $('#personnel-unit-options');
+  if (!query) { panel.hidden = true; return; }
+  const matches = units.filter((unit) => unit.number.toLowerCase().includes(query)).slice(0, 8);
+  panel.innerHTML = matches.length ? matches.map((unit) => `<button class="suggestion" type="button" data-personnel-unit-id="${esc(unit.id)}"><strong>Unidad ${esc(unit.number)}</strong><small>${esc(unitDescription(unit))}</small></button>`).join('') : personnelMissingSuggestion('unidad');
+  panel.hidden = false;
+}
+function renderPersonnelControl() {
+  const body = $('#personnel-control-body');
+  body.innerHTML = personnelReports.length
+    ? personnelReports.map((report) => `<tr>
+      <td>${new Date(String(report.effectiveDate).length === 10 ? `${report.effectiveDate}T12:00:00` : report.effectiveDate).toLocaleDateString('es-MX')}<br><small>Capturado: ${new Date(report.createdAt).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</small></td>
+      <td><strong>${esc(personnelMovementLabel(report.movementType))}</strong><br><small>${esc(report.assignmentType === 'temporary' ? 'Asignación temporal' : report.assignmentType === 'permanent' ? 'Asignación permanente' : 'Sin cambio de asignación')}</small></td>
+      <td><strong>${esc(report.driverName)}</strong><br><small>${report.unitNumber ? `Unidad ${esc(report.unitNumber)}` : 'Sin unidad asignada'}</small></td>
+      <td>${esc(report.reason)}${report.notes ? `<br><small>${esc(report.notes)}</small>` : ''}</td>
+      <td>${esc(report.reportedByEmail || 'Personal autorizado')}</td>
+      <td>${personnelStatusBadge(report.status)}<br><select class="personnel-status-select" data-personnel-status-id="${esc(report.id)}" aria-label="Actualizar estado de ${esc(report.driverName)}"><option value="pending"${report.status === 'pending' ? ' selected' : ''}>Pendiente</option><option value="reviewed"${report.status === 'reviewed' ? ' selected' : ''}>Revisado</option><option value="approved"${report.status === 'approved' ? ' selected' : ''}>Aprobado</option></select></td>
+    </tr>`).join('')
+    : '<tr class="empty"><td colspan="6">No hay movimientos que coincidan con los filtros.</td></tr>';
+}
+async function loadPersonnelReports() {
+  const params = new URLSearchParams();
+  if ($('#personnel-movement-filter').value) params.set('movementType', $('#personnel-movement-filter').value);
+  if ($('#personnel-status-filter').value) params.set('status', $('#personnel-status-filter').value);
+  const response = await fetch(`/api/personnel-control${params.size ? `?${params.toString()}` : ''}`);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No fue posible consultar los movimientos de personal.');
+  personnelReports = data;
+  renderPersonnelControl();
+}
+function resetPersonnelForm() {
+  $('#personnel-control-form').reset();
+  $('#personnel-effective-date').value = isoDateInMexico(new Date());
+  personnelSelectedDriver = null;
+  personnelSelectedUnit = null;
+  $('#personnel-selected-driver').hidden = true;
+  $('#personnel-selected-unit').hidden = true;
+  $('#personnel-driver-options').hidden = true;
+  $('#personnel-unit-options').hidden = true;
+}
 function reconciliationStatusText(row) {
   if (row.status === 'ready') return 'Datos completos';
   if (row.status === 'no_fuel_records') return 'Sin cargas en periodo';
@@ -433,6 +516,88 @@ $('#driver-assignment-form').addEventListener('submit', async (event) => {
   } catch (error) {
     showDriverAssignmentResult(error.message || 'No fue posible actualizar la asignación.', 'error');
   } finally { button.disabled = false; }
+});
+$('#personnel-driver-search').addEventListener('input', () => {
+  personnelSelectedDriver = null;
+  $('#personnel-selected-driver').hidden = true;
+  updatePersonnelDriverSuggestions();
+});
+$('#personnel-unit-search').addEventListener('input', () => {
+  personnelSelectedUnit = null;
+  $('#personnel-selected-unit').hidden = true;
+  updatePersonnelUnitSuggestions();
+});
+$('#personnel-driver-options').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-personnel-driver-id]');
+  const driver = button && drivers.find((item) => String(item.id) === button.dataset.personnelDriverId);
+  if (driver) setPersonnelDriver(driver);
+});
+$('#personnel-unit-options').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-personnel-unit-id]');
+  const unit = button && units.find((item) => String(item.id) === button.dataset.personnelUnitId);
+  if (unit) setPersonnelUnit(unit);
+});
+$('#personnel-control-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const driverName = $('#personnel-driver-search').value.trim();
+  const unitNumber = $('#personnel-unit-search').value.trim().toUpperCase();
+  const movementType = $('#personnel-movement-type').value;
+  const reason = $('#personnel-reason').value.trim();
+  const error = $('#personnel-control-error');
+  error.textContent = '';
+  if (!movementType || !driverName || !reason) {
+    error.textContent = 'Completa el tipo de movimiento, el chofer y el motivo antes de guardar.';
+    return;
+  }
+  const button = $('#save-personnel-report');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/personnel-control', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        movementType,
+        effectiveDate: $('#personnel-effective-date').value,
+        assignmentType: $('#personnel-assignment-type').value,
+        driverId: personnelSelectedDriver?.id || '',
+        driverName,
+        unitId: personnelSelectedUnit?.id || '',
+        unitNumber,
+        reason,
+        notes: $('#personnel-notes').value.trim()
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible guardar el reporte semanal.');
+    resetPersonnelForm();
+    await loadPersonnelReports();
+    showToast('Reporte semanal guardado como pendiente de revisión.');
+  } catch (requestError) {
+    error.textContent = requestError.message || 'No fue posible guardar el reporte semanal.';
+  } finally { button.disabled = false; }
+});
+$('#personnel-movement-filter').addEventListener('change', () => void loadPersonnelReports().catch((error) => showToast(error.message || 'No fue posible filtrar los movimientos.')));
+$('#personnel-status-filter').addEventListener('change', () => void loadPersonnelReports().catch((error) => showToast(error.message || 'No fue posible filtrar los movimientos.')));
+$('#personnel-clear-filters').addEventListener('click', () => {
+  $('#personnel-movement-filter').value = '';
+  $('#personnel-status-filter').value = '';
+  void loadPersonnelReports().catch((error) => showToast(error.message || 'No fue posible actualizar los movimientos.'));
+});
+$('#personnel-control-body').addEventListener('change', async (event) => {
+  const select = event.target.closest('[data-personnel-status-id]');
+  if (!select) return;
+  select.disabled = true;
+  try {
+    const response = await fetch(`/api/personnel-control/${encodeURIComponent(select.dataset.personnelStatusId)}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: select.value }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible actualizar el estado.');
+    const report = personnelReports.find((item) => item.id === data.id);
+    if (report) report.status = data.status;
+    renderPersonnelControl();
+    showToast(`Reporte marcado como ${personnelStatusLabel(data.status).toLowerCase()}.`);
+  } catch (requestError) {
+    showToast(requestError.message || 'No fue posible actualizar el estado.');
+    await loadPersonnelReports().catch(() => {});
+  } finally { select.disabled = false; }
 });
 async function applyRecordsFilter() {
   const from = $('#records-date-from').value;
@@ -614,7 +779,14 @@ $('#driver-search').addEventListener('input', () => {
   selectedDriver = null; $('#selected-driver').hidden = true; setError('#driver-error', ''); updateDriverSuggestions(); updateReview();
 });
 $('#driver-options').addEventListener('click', e => { const button = e.target.closest('[data-driver-id]'); if (button) setDriver(drivers.find(driver => driver.id === button.dataset.driverId)); });
-document.addEventListener('click', e => { if (!e.target.closest('.autocomplete')) { $('#unit-options').hidden = true; $('#driver-options').hidden = true; } });
+document.addEventListener('click', e => {
+  if (!e.target.closest('.autocomplete')) {
+    $('#unit-options').hidden = true;
+    $('#driver-options').hidden = true;
+    $('#personnel-driver-options').hidden = true;
+    $('#personnel-unit-options').hidden = true;
+  }
+});
 ['gallons','amount','station','ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('input', updateReview));
 $('#fuel-source').addEventListener('change', () => { updateFuelSourceFields(); updateReview(); });
 $('#odometer').addEventListener('input', () => { formatOdometerInput(); validateOdometer(Boolean(selectedUnit)); updateReview(); });
@@ -929,6 +1101,7 @@ function setAdminInterface(authenticated, role = null) {
   $('#conciliacion').hidden = !authenticated;
   $('#inventario-diesel').hidden = !authenticated;
   $('#asignar-chofer').hidden = !authenticated;
+  $('#control-personal').hidden = !authenticated;
   $('#unidades').hidden = !authenticated;
   $('#unit-form').hidden = role !== 'admin';
   $('#fuel-minimums-form').hidden = role !== 'admin';
@@ -936,6 +1109,7 @@ function setAdminInterface(authenticated, role = null) {
   $('#reconciliation-link').hidden = !authenticated;
   $('#fuel-inventory-link').hidden = !authenticated;
   $('#driver-assignment-link').hidden = !authenticated;
+  $('#personnel-control-link').hidden = !authenticated;
   $('#units-link').hidden = !authenticated;
   $('#login-button').hidden = true;
   $('#logout-button').hidden = !authenticated;
@@ -963,10 +1137,11 @@ async function synchronizeWithDatabase() {
       fuelInventory = [];
       fuelPurchases = [];
       fuelInventoryMovements = [];
+      personnelReports = [];
       localStorage.removeItem(STORAGE.units);
       localStorage.removeItem(STORAGE.drivers);
       localStorage.removeItem(STORAGE.records);
-      renderUnitCatalog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements();
+      renderUnitCatalog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements(); renderPersonnelControl();
       return;
     }
     const [unitsResponse, driversResponse, inventoryResponse] = await Promise.all([fetch('/api/units'), fetch('/api/drivers'), fetch('/api/fuel-inventory')]);
@@ -977,7 +1152,7 @@ async function synchronizeWithDatabase() {
     renderDriverAssignmentOptions();
     renderFuelInventory();
     if (!$('#reconciliation-date-from').value || !$('#reconciliation-date-to').value) setDefaultReconciliationRange();
-    await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog(), loadFuelPurchases(), loadFuelInventoryMovements()]);
+    await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog(), loadFuelPurchases(), loadFuelInventoryMovements(), loadPersonnelReports()]);
     renderUnitCatalog(); updateReview();
   } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
 }
@@ -1018,6 +1193,7 @@ $('#logout-button').addEventListener('click', async () => {
   driverAssignmentLog = [];
   fuelPurchases = [];
   fuelInventoryMovements = [];
+  personnelReports = [];
   units = [];
   drivers = [];
   fuelInventory = [];
@@ -1031,8 +1207,9 @@ $('#logout-button').addEventListener('click', async () => {
   renderFuelInventory();
   renderFuelPurchases();
   renderFuelInventoryMovements();
+  renderPersonnelControl();
   location.hash = '#registro';
   showToast('Sesión cerrada.');
 });
 
-setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements(); updateFuelSourceFields(); updateReview(); synchronizeWithDatabase();
+setAdminInterface(false); setDefaultReconciliationRange(); resetPersonnelForm(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements(); renderPersonnelControl(); updateFuelSourceFields(); updateReview(); synchronizeWithDatabase();

@@ -25,6 +25,7 @@
         <a id="reconciliation-link" href="#conciliacion" hidden>Conciliación</a>
         <a id="fuel-inventory-link" href="#inventario-diesel" hidden>Inventario diésel</a>
         <a id="driver-assignment-link" href="#asignar-chofer" hidden>Asignar chofer</a>
+        <a id="personnel-control-link" href="#control-personal" hidden>Control semanal</a>
         <a id="units-link" href="#unidades" hidden>Unidades</a>
         <button id="login-button" class="nav-button" type="button" hidden>Iniciar sesión</button>
         <button id="logout-button" class="nav-button" type="button" hidden>Salir</button>
@@ -314,6 +315,81 @@
             </div>
           </div>
           <div class="table-wrap"><table class="driver-assignment-log-table"><thead><tr><th>Fecha</th><th>Unidad</th><th>Chofer anterior</th><th>Chofer solicitado</th><th>Realizado por</th><th>Resultado</th></tr></thead><tbody id="driver-assignment-log-body"><tr class="empty"><td colspan="6">Aún no hay asignaciones registradas.</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="control-personal" class="card personnel-control-card" hidden>
+        <div class="records-heading">
+          <div>
+            <p class="eyebrow">Supervisión</p>
+            <h2>Control semanal de personal y asignaciones</h2>
+            <p class="muted">Reporta altas, bajas, cambios de unidad y movimientos que no fueron notificados. Cada reporte queda pendiente de revisión.</p>
+          </div>
+        </div>
+        <p class="personnel-control-note"><strong>Importante:</strong> este apartado crea una bitácora administrativa; no modifica automáticamente Motive ni cambia la asignación operativa.</p>
+        <form id="personnel-control-form" class="personnel-control-form" novalidate>
+          <label>Tipo de movimiento
+            <select id="personnel-movement-type" required>
+              <option value="">Selecciona movimiento</option>
+              <option value="onboarding">Alta de chofer</option>
+              <option value="offboarding">Baja de chofer</option>
+              <option value="temporary_assignment">Cambio temporal de unidad</option>
+              <option value="permanent_assignment">Cambio permanente de unidad</option>
+              <option value="unreported_change">Movimiento no notificado</option>
+              <option value="weekly_review">Confirmación semanal</option>
+            </select>
+          </label>
+          <label>Fecha efectiva
+            <input id="personnel-effective-date" type="date" required />
+          </label>
+          <label>Tipo de asignación
+            <select id="personnel-assignment-type">
+              <option value="not_applicable">No aplica</option>
+              <option value="temporary">Temporal</option>
+              <option value="permanent">Permanente</option>
+            </select>
+          </label>
+          <div>
+            <label for="personnel-driver-search">Chofer</label>
+            <div class="autocomplete">
+              <input id="personnel-driver-search" type="text" autocomplete="off" maxlength="160" placeholder="Busca o escribe el nombre" required />
+              <div id="personnel-driver-options" class="suggestions" role="listbox" hidden></div>
+            </div>
+            <p class="field-help">Selecciónalo si aparece en Motive. Si es nuevo, escribe su nombre para dejar el aviso.</p>
+            <div id="personnel-selected-driver" class="unit-confirmation assignment-confirmation" hidden></div>
+          </div>
+          <div>
+            <label for="personnel-unit-search">Unidad relacionada <small>(opcional)</small></label>
+            <div class="autocomplete">
+              <input id="personnel-unit-search" type="text" autocomplete="off" maxlength="40" placeholder="Busca o escribe el número" />
+              <div id="personnel-unit-options" class="suggestions" role="listbox" hidden></div>
+            </div>
+            <p class="field-help">Puedes dejarla vacía si el chofer aún no tiene unidad.</p>
+            <div id="personnel-selected-unit" class="unit-confirmation assignment-confirmation" hidden></div>
+          </div>
+          <label class="personnel-wide">Motivo o incidencia
+            <input id="personnel-reason" type="text" maxlength="240" placeholder="Ej. Ingreso nuevo pendiente de alta en Motive" required />
+          </label>
+          <label class="personnel-wide">Comentarios <small>(opcional)</small>
+            <textarea id="personnel-notes" maxlength="1000" rows="3" placeholder="Ej. Sustituirá temporalmente la unidad V-0128 durante mantenimiento."></textarea>
+          </label>
+          <div class="personnel-actions">
+            <a class="support-inline-link" href="https://wa.me/526183249678?text=Hola%2C%20necesito%20apoyo%20con%20un%20movimiento%20de%20personal%20o%20asignaci%C3%B3n%20que%20no%20aparece%20en%20Motive." target="_blank" rel="noopener">Contactar soporte por WhatsApp</a>
+            <button id="save-personnel-report" class="primary-button" type="submit">Guardar reporte semanal</button>
+          </div>
+        </form>
+        <p id="personnel-control-error" class="error" role="alert"></p>
+
+        <div class="driver-assignment-log personnel-log">
+          <div class="records-heading">
+            <div><p class="eyebrow">Seguimiento</p><h3>Bitácora de movimientos</h3><p class="muted">Filtra y actualiza el estado conforme se revise cada caso.</p></div>
+          </div>
+          <div class="personnel-filters">
+            <label>Movimiento<select id="personnel-movement-filter"><option value="">Todos los movimientos</option><option value="onboarding">Altas</option><option value="offboarding">Bajas</option><option value="temporary_assignment">Cambios temporales</option><option value="permanent_assignment">Cambios permanentes</option><option value="unreported_change">No notificados</option><option value="weekly_review">Confirmaciones semanales</option></select></label>
+            <label>Estado<select id="personnel-status-filter"><option value="">Todos los estados</option><option value="pending">Pendientes</option><option value="reviewed">Revisados</option><option value="approved">Aprobados</option></select></label>
+            <button id="personnel-clear-filters" class="filter-link" type="button">Limpiar filtros</button>
+          </div>
+          <div class="table-wrap"><table class="personnel-control-table"><thead><tr><th>Fecha efectiva</th><th>Movimiento</th><th>Chofer / unidad</th><th>Motivo</th><th>Reportó</th><th>Estado</th></tr></thead><tbody id="personnel-control-body"><tr class="empty"><td colspan="6">Aún no hay movimientos semanales registrados.</td></tr></tbody></table></div>
         </div>
       </section>
 

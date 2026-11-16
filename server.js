@@ -149,6 +149,25 @@ async function initializeDatabase() {
       status TEXT NOT NULL,
       message TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS personnel_control_reports (
+      report_id BIGSERIAL PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      effective_date DATE NOT NULL,
+      movement_type TEXT NOT NULL CHECK (movement_type IN ('onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'unreported_change', 'weekly_review')),
+      driver_id TEXT REFERENCES drivers(id),
+      driver_name TEXT NOT NULL,
+      unit_id TEXT REFERENCES units(id),
+      unit_number TEXT,
+      assignment_type TEXT NOT NULL DEFAULT 'not_applicable' CHECK (assignment_type IN ('temporary', 'permanent', 'not_applicable')),
+      reason TEXT NOT NULL,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'approved')),
+      reported_by_role TEXT,
+      reported_by_email TEXT,
+      status_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      status_updated_by_email TEXT
+    );
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_vehicle_id TEXT UNIQUE;
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer NUMERIC(12,2);
     ALTER TABLE units ADD COLUMN IF NOT EXISTS motive_odometer_unit TEXT;
@@ -202,6 +221,8 @@ async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS fuel_inventory_adjustments_created_at_idx ON fuel_inventory_adjustments (created_at DESC, adjustment_id DESC);
     CREATE INDEX IF NOT EXISTS motive_odometer_readings_unit_observed_at_idx ON motive_odometer_readings (unit_id, observed_at DESC);
     CREATE INDEX IF NOT EXISTS driver_assignment_log_created_at_idx ON driver_assignment_log (created_at DESC, log_id DESC);
+    CREATE INDEX IF NOT EXISTS personnel_control_reports_created_at_idx ON personnel_control_reports (created_at DESC, report_id DESC);
+    CREATE INDEX IF NOT EXISTS personnel_control_reports_status_idx ON personnel_control_reports (status, effective_date DESC);
     CREATE TABLE IF NOT EXISTS motive_connection (
       id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id), encrypted_access_token TEXT NOT NULL,
       encrypted_refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
@@ -718,6 +739,75 @@ async function handleApi(request, response, url) {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, [unit.id, unit.number, assignment.previousMotiveDriverId, previousDriverName, driver.id, driver.name, session.role || 'staff', session.email || null, assignment.status, assignment.message]);
     const { previousMotiveDriverId, ...assignmentResponse } = assignment;
     sendJson(response, 200, { unitNumber: unit.number, driverName: driver.name, ...assignmentResponse }); return true;
+  }
+  if (url.pathname === '/api/personnel-control' && request.method === 'GET') {
+    const status = cleanText(url.searchParams.get('status') || '', 20);
+    const movementType = cleanText(url.searchParams.get('movementType') || '', 40);
+    const validStatuses = ['pending', 'reviewed', 'approved'];
+    const validMovementTypes = ['onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'unreported_change', 'weekly_review'];
+    const values = [], conditions = [];
+    if (status) {
+      if (!validStatuses.includes(status)) { sendJson(response, 400, { error: 'El estado seleccionado no es válido.' }); return true; }
+      values.push(status); conditions.push(`status = $${values.length}`);
+    }
+    if (movementType) {
+      if (!validMovementTypes.includes(movementType)) { sendJson(response, 400, { error: 'El tipo de movimiento no es válido.' }); return true; }
+      values.push(movementType); conditions.push(`movement_type = $${values.length}`);
+    }
+    const reports = await pool.query(`SELECT id, created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", assignment_type AS "assignmentType", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"
+      FROM personnel_control_reports ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+      ORDER BY effective_date DESC, created_at DESC, report_id DESC LIMIT 200`, values);
+    sendJson(response, 200, reports.rows); return true;
+  }
+  if (url.pathname === '/api/personnel-control' && request.method === 'POST') {
+    const session = await requireStaff(request, response);
+    if (!session) return true;
+    const body = await readJson(request);
+    const validMovementTypes = ['onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'unreported_change', 'weekly_review'];
+    const validAssignmentTypes = ['temporary', 'permanent', 'not_applicable'];
+    const movementType = cleanText(body.movementType, 40);
+    const effectiveDate = cleanText(body.effectiveDate, 10);
+    const requestedDriverId = cleanText(body.driverId, 100);
+    const requestedUnitId = cleanText(body.unitId, 80);
+    const assignmentType = cleanText(body.assignmentType || 'not_applicable', 20);
+    const reason = cleanText(body.reason, 240);
+    const notes = cleanText(body.notes, 1_000) || null;
+    if (!validMovementTypes.includes(movementType) || !isIsoDate(effectiveDate) || !validAssignmentTypes.includes(assignmentType) || !reason) {
+      sendJson(response, 400, { error: 'Completa el tipo de movimiento, fecha efectiva, motivo y tipo de asignación.' }); return true;
+    }
+    let driverId = null;
+    let driverName = cleanText(body.driverName, 160);
+    if (requestedDriverId) {
+      const driver = await pool.query('SELECT id, name FROM drivers WHERE id = $1', [requestedDriverId]);
+      if (!driver.rowCount) { sendJson(response, 400, { error: 'El chofer seleccionado ya no está disponible.' }); return true; }
+      driverId = driver.rows[0].id;
+      driverName = driver.rows[0].name;
+    }
+    if (!driverName) { sendJson(response, 400, { error: 'Indica el nombre del chofer para registrar el movimiento.' }); return true; }
+    let unitId = null;
+    let unitNumber = cleanText(body.unitNumber, 40).toUpperCase() || null;
+    if (requestedUnitId) {
+      const unit = await pool.query('SELECT id, number FROM units WHERE id = $1', [requestedUnitId]);
+      if (!unit.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada ya no está disponible.' }); return true; }
+      unitId = unit.rows[0].id;
+      unitNumber = unit.rows[0].number;
+    }
+    const saved = await pool.query(`INSERT INTO personnel_control_reports (id, effective_date, movement_type, driver_id, driver_name, unit_id, unit_number, assignment_type, reason, notes, status, reported_by_role, reported_by_email, status_updated_by_email)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $12)
+      RETURNING id, created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", assignment_type AS "assignmentType", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"`, [crypto.randomUUID(), effectiveDate, movementType, driverId, driverName, unitId, unitNumber, assignmentType, reason, notes, session.role || 'staff', session.email || null]);
+    sendJson(response, 201, saved.rows[0]); return true;
+  }
+  const personnelStatusMatch = url.pathname.match(/^\/api\/personnel-control\/([^/]+)\/status$/);
+  if (personnelStatusMatch && request.method === 'PATCH') {
+    const session = await requireStaff(request, response);
+    if (!session) return true;
+    const body = await readJson(request);
+    const status = cleanText(body.status, 20);
+    if (!['pending', 'reviewed', 'approved'].includes(status)) { sendJson(response, 400, { error: 'Selecciona un estado válido.' }); return true; }
+    const updated = await pool.query(`UPDATE personnel_control_reports SET status = $1, status_updated_at = NOW(), status_updated_by_email = $2
+      WHERE id = $3 RETURNING id, status, status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"`, [status, session.email || null, decodeURIComponent(personnelStatusMatch[1])]);
+    if (!updated.rowCount) { sendJson(response, 404, { error: 'No se encontró el reporte solicitado.' }); return true; }
+    sendJson(response, 200, updated.rows[0]); return true;
   }
   if (url.pathname === '/api/evidence' && request.method === 'POST') {
     const body = await readJson(request, 12_000_000);

@@ -211,6 +211,26 @@ th { background: #eef2ff; color: #324a91; }
 .fuel-movements-table { min-width: 900px; }
 .movement-positive { color: #176747; font-weight: 800; }
 .movement-negative { color: #a41528; font-weight: 800; }
+.personnel-control-card { margin-top: 28px; padding: 27px; border-top: 4px solid #1d3487; }
+.personnel-control-note { margin: 0 0 17px; padding: 11px 13px; border-left: 4px solid #c78200; border-radius: 8px; background: #fff8df; color: #765100; font-size: 13px; line-height: 1.45; }
+.personnel-control-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; padding: 17px; border: 1px solid #d7def0; border-radius: 11px; background: #f7f9ff; }
+.personnel-control-form label { margin: 0; }
+.personnel-control-form input, .personnel-control-form select, .personnel-control-form textarea, .personnel-filters select { width: 100%; margin-top: 5px; padding: 10px; border: 1px solid #cbd4e7; border-radius: 10px; background: #fff; color: var(--ink); font: inherit; }
+.personnel-control-form textarea { min-height: 74px; resize: vertical; }
+.personnel-control-form input:focus, .personnel-control-form select:focus, .personnel-control-form textarea:focus, .personnel-filters select:focus { outline: none; border-color: #dc2638; box-shadow: 0 0 0 4px rgba(220, 38, 56, .12); }
+.personnel-control-form small { color: var(--muted); font-weight: 500; }
+.personnel-wide { grid-column: 1 / -1; }
+.personnel-actions { grid-column: 1 / -1; display: flex; gap: 14px; align-items: center; justify-content: space-between; }
+.personnel-actions .primary-button { min-height: 44px; white-space: nowrap; }
+.support-inline-link { color: #176747; font-size: 13px; font-weight: 800; text-decoration: none; }
+.support-inline-link:hover { text-decoration: underline; }
+.personnel-log { margin-top: 28px; }
+.personnel-filters { display: flex; gap: 11px; align-items: end; margin: 0 0 14px; padding: 13px; border: 1px solid #d7def0; border-radius: 10px; background: #f7f9ff; }
+.personnel-filters label { flex: 0 1 240px; margin: 0; color: #1b3277; }
+.personnel-filters .filter-link { align-self: center; margin-top: 20px; }
+.personnel-control-table { min-width: 970px; }
+.personnel-control-table small { color: var(--muted); }
+.personnel-status-select { min-width: 120px; padding: 7px 8px; border: 1px solid #cbd4e7; border-radius: 7px; background: #fff; color: var(--ink); font: inherit; font-size: 12px; }
 
 @media (max-width: 820px) {
   .topbar { min-height: 76px; }
@@ -232,6 +252,8 @@ th { background: #eef2ff; color: #324a91; }
   .fuel-minimums-form strong, .fuel-minimums-form .secondary-button { grid-column: 1 / -1; }
   .fuel-adjustment-form { grid-template-columns: 1fr 1fr; }
   .fuel-adjustment-form .adjustment-reason, .fuel-adjustment-form .secondary-button { grid-column: 1 / -1; }
+  .personnel-control-form { grid-template-columns: 1fr 1fr; }
+  .personnel-filters { flex-wrap: wrap; }
 }
 @media (max-width: 530px) {
   .topbar .brand img { max-width: 106px; height: 47px; }
@@ -256,7 +278,13 @@ th { background: #eef2ff; color: #324a91; }
   .reconciliation-filters .secondary-button { width: 100%; }
   .driver-assignment-form { grid-template-columns: 1fr; }
   .driver-assignment-form .primary-button { grid-column: auto; width: 100%; }
-  .tank-balance-grid, .fuel-purchase-form, .fuel-minimums-form, .fuel-adjustment-form { grid-template-columns: 1fr; }
+  .tank-balance-grid, .fuel-purchase-form, .fuel-minimums-form, .fuel-adjustment-form, .personnel-control-form { grid-template-columns: 1fr; }
   .fuel-purchase-form .compact-upload, .fuel-purchase-form .primary-button { grid-column: auto; width: 100%; }
   .fuel-minimums-form strong, .fuel-minimums-form .secondary-button, .fuel-adjustment-form .adjustment-reason, .fuel-adjustment-form .secondary-button { grid-column: auto; width: 100%; }
+  .personnel-wide { grid-column: auto; }
+  .personnel-actions { grid-column: auto; flex-direction: column; align-items: stretch; }
+  .personnel-actions .primary-button { width: 100%; }
+  .personnel-filters { display: grid; grid-template-columns: 1fr; }
+  .personnel-filters label { max-width: none; }
+  .personnel-filters .filter-link { margin-top: 0; justify-self: start; }
 }
