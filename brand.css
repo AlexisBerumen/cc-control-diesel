@@ -139,12 +139,24 @@ th { background: #eef2ff; color: #324a91; }
 .driver-assignment-log-table small { color: var(--muted); }
 .fuel-inventory-card { margin-top: 28px; padding: 27px; border-top: 4px solid #1d3487; }
 .tank-balance-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.tank-balance { padding: 17px; border: 1px solid #d5deee; border-radius: 11px; background: linear-gradient(145deg, #f8faff, #eef2ff); }
+.tank-balance { padding: 17px; border: 1px solid #d5deee; border-radius: 11px; background: linear-gradient(145deg, #f8faff, #eef2ff); transition: border-color .2s ease, background .2s ease; }
 .tank-balance span { display: block; color: #61719a; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .tank-balance strong { display: block; margin-top: 4px; color: #1b3584; font: 700 18px Outfit, sans-serif; }
 .tank-balance b { display: block; margin-top: 9px; color: #176747; font: 700 25px Outfit, sans-serif; }
-.field-grid select, .fuel-purchase-form select { width: 100%; padding: 11px 12px; border: 1px solid #cbd5d8; border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
-.field-grid select:focus, .fuel-purchase-form select:focus { outline: none; border-color: var(--orange); box-shadow: 0 0 0 3px #f57d2822; }
+.tank-alert { min-height: 18px; margin: 9px 0 0; font-size: 12px; font-weight: 700; line-height: 1.35; }
+.tank-alert.okay { color: #176747; }
+.tank-alert.warning { color: #8a5b00; }
+.tank-alert.critical { color: #a41528; }
+.tank-balance.tank-warning { border-color: #f0c04b; background: #fff9e7; }
+.tank-balance.tank-warning b { color: #8a5b00; }
+.tank-balance.tank-critical { border-color: #ec8892; background: #fff1f3; }
+.tank-balance.tank-critical b { color: #a41528; }
+.fuel-minimums-form { display: grid; grid-template-columns: 1fr 145px 145px auto; gap: 12px; align-items: end; margin-top: 16px; padding: 14px; border: 1px solid #d5deee; border-radius: 10px; background: #f8faff; }
+.fuel-minimums-form strong { padding-bottom: 11px; color: #1b3584; font: 700 14px Outfit, sans-serif; }
+.fuel-minimums-form label, .fuel-adjustment-form label { margin: 0; color: var(--ink); font-size: 13px; font-weight: 700; }
+.fuel-minimums-form input, .fuel-adjustment-form input { width: 100%; margin-top: 5px; }
+.field-grid select, .fuel-purchase-form select, .fuel-adjustment-form select { width: 100%; padding: 11px 12px; border: 1px solid #cbd5d8; border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
+.field-grid select:focus, .fuel-purchase-form select:focus, .fuel-adjustment-form select:focus { outline: none; border-color: var(--orange); box-shadow: 0 0 0 3px #f57d2822; }
 .fuel-purchase-form { display: grid; grid-template-columns: minmax(170px, .8fr) minmax(170px, .8fr) minmax(220px, 1.3fr) auto; gap: 14px; align-items: end; }
 .fuel-purchase-form label { margin: 0; }
 .fuel-purchase-form input { margin-top: 5px; }
@@ -153,6 +165,12 @@ th { background: #eef2ff; color: #324a91; }
 .compact-upload .upload-icon { margin-bottom: 3px; }
 .compact-upload .file-name { margin-top: 4px; }
 .fuel-purchase-table { min-width: 720px; }
+.inventory-adjustment { margin-top: 22px; padding: 20px; border: 1px solid #f0c04b; border-radius: 12px; background: #fffaf0; }
+.fuel-adjustment-form { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(150px, .9fr) minmax(130px, .7fr) minmax(240px, 1.6fr) auto; gap: 12px; align-items: end; }
+.fuel-adjustment-form .secondary-button { min-height: 44px; white-space: nowrap; }
+.fuel-movements-table { min-width: 900px; }
+.movement-positive { color: #176747; font-weight: 800; }
+.movement-negative { color: #a41528; font-weight: 800; }
 
 @media (max-width: 820px) {
   .topbar { min-height: 76px; }
@@ -165,6 +183,10 @@ th { background: #eef2ff; color: #324a91; }
   .driver-assignment-form .primary-button { grid-column: 1 / -1; }
   .fuel-purchase-form { grid-template-columns: 1fr 1fr; }
   .fuel-purchase-form .compact-upload, .fuel-purchase-form .primary-button { grid-column: 1 / -1; }
+  .fuel-minimums-form { grid-template-columns: 1fr 1fr; }
+  .fuel-minimums-form strong, .fuel-minimums-form .secondary-button { grid-column: 1 / -1; }
+  .fuel-adjustment-form { grid-template-columns: 1fr 1fr; }
+  .fuel-adjustment-form .adjustment-reason, .fuel-adjustment-form .secondary-button { grid-column: 1 / -1; }
 }
 @media (max-width: 530px) {
   .topbar .brand img { max-width: 106px; height: 47px; }
@@ -178,6 +200,7 @@ th { background: #eef2ff; color: #324a91; }
   .reconciliation-filters .secondary-button { width: 100%; }
   .driver-assignment-form { grid-template-columns: 1fr; }
   .driver-assignment-form .primary-button { grid-column: auto; width: 100%; }
-  .tank-balance-grid, .fuel-purchase-form { grid-template-columns: 1fr; }
+  .tank-balance-grid, .fuel-purchase-form, .fuel-minimums-form, .fuel-adjustment-form { grid-template-columns: 1fr; }
   .fuel-purchase-form .compact-upload, .fuel-purchase-form .primary-button { grid-column: auto; width: 100%; }
+  .fuel-minimums-form strong, .fuel-minimums-form .secondary-button, .fuel-adjustment-form .adjustment-reason, .fuel-adjustment-form .secondary-button { grid-column: auto; width: 100%; }
 }

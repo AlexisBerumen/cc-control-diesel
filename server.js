@@ -101,6 +101,7 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS fuel_tanks (
       location TEXT PRIMARY KEY CHECK (location IN ('Hobbs', 'Orla')),
       balance_gallons NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (balance_gallons >= 0),
+      minimum_gallons NUMERIC(12,2) NOT NULL DEFAULT 500 CHECK (minimum_gallons >= 0),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS fuel_purchases (
@@ -118,10 +119,21 @@ async function initializeDatabase() {
       movement_id BIGSERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       tank_location TEXT NOT NULL REFERENCES fuel_tanks(location),
-      movement_type TEXT NOT NULL CHECK (movement_type IN ('purchase', 'fuel_load')),
+      movement_type TEXT NOT NULL CHECK (movement_type IN ('purchase', 'fuel_load', 'adjustment_in', 'adjustment_out')),
       gallons NUMERIC(12,2) NOT NULL CHECK (gallons <> 0),
       balance_after NUMERIC(12,2) NOT NULL CHECK (balance_after >= 0),
       reference_id TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS fuel_inventory_adjustments (
+      adjustment_id BIGSERIAL PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      tank_location TEXT NOT NULL REFERENCES fuel_tanks(location),
+      direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
+      gallons NUMERIC(12,2) NOT NULL CHECK (gallons > 0),
+      reason TEXT NOT NULL,
+      recorded_by_role TEXT,
+      recorded_by_email TEXT
     );
     CREATE TABLE IF NOT EXISTS driver_assignment_log (
       log_id BIGSERIAL PRIMARY KEY,
@@ -176,6 +188,9 @@ async function initializeDatabase() {
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS fuel_source TEXT;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_fuel_source_check;
     ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_fuel_source_check CHECK (fuel_source IS NULL OR fuel_source IN ('hobbs', 'orla', 'pilot'));
+    ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS minimum_gallons NUMERIC(12,2) NOT NULL DEFAULT 500 CHECK (minimum_gallons >= 0);
+    ALTER TABLE fuel_inventory_movements DROP CONSTRAINT IF EXISTS fuel_inventory_movements_movement_type_check;
+    ALTER TABLE fuel_inventory_movements ADD CONSTRAINT fuel_inventory_movements_movement_type_check CHECK (movement_type IN ('purchase', 'fuel_load', 'adjustment_in', 'adjustment_out'));
     UPDATE fuel_records SET driver_name = 'No registrado' WHERE driver_name IS NULL;
     ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
@@ -184,6 +199,7 @@ async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS fuel_records_unit_odometer_idx ON fuel_records (unit_id, odometer DESC);
     CREATE INDEX IF NOT EXISTS fuel_purchases_created_at_idx ON fuel_purchases (created_at DESC, purchase_id DESC);
     CREATE INDEX IF NOT EXISTS fuel_inventory_movements_tank_created_at_idx ON fuel_inventory_movements (tank_location, created_at DESC, movement_id DESC);
+    CREATE INDEX IF NOT EXISTS fuel_inventory_adjustments_created_at_idx ON fuel_inventory_adjustments (created_at DESC, adjustment_id DESC);
     CREATE INDEX IF NOT EXISTS motive_odometer_readings_unit_observed_at_idx ON motive_odometer_readings (unit_id, observed_at DESC);
     CREATE INDEX IF NOT EXISTS driver_assignment_log_created_at_idx ON driver_assignment_log (created_at DESC, log_id DESC);
     CREATE TABLE IF NOT EXISTS motive_connection (
@@ -579,8 +595,59 @@ async function handleApi(request, response, url) {
     return true;
   }
   if (url.pathname === '/api/fuel-inventory' && request.method === 'GET') {
-    const tanks = await pool.query('SELECT location, balance_gallons AS "balanceGallons", updated_at AS "updatedAt" FROM fuel_tanks ORDER BY location');
+    const tanks = await pool.query('SELECT location, balance_gallons AS "balanceGallons", minimum_gallons AS "minimumGallons", updated_at AS "updatedAt" FROM fuel_tanks ORDER BY location');
     sendJson(response, 200, { tanks: tanks.rows }); return true;
+  }
+  if (url.pathname === '/api/fuel-inventory/minimums' && request.method === 'PUT') {
+    if (!await requireAdmin(request, response)) return true;
+    const body = await readJson(request);
+    const hobbsMinimum = Number(body.hobbsMinimum), orlaMinimum = Number(body.orlaMinimum);
+    if (![hobbsMinimum, orlaMinimum].every((value) => Number.isFinite(value) && value >= 0 && value <= 100_000)) { sendJson(response, 400, { error: 'Indica mínimos válidos entre 0 y 100,000 galones.' }); return true; }
+    const result = await pool.query(`UPDATE fuel_tanks SET minimum_gallons = CASE location WHEN 'Hobbs' THEN $1 WHEN 'Orla' THEN $2 END, updated_at = NOW()
+      WHERE location IN ('Hobbs', 'Orla') RETURNING location, balance_gallons AS "balanceGallons", minimum_gallons AS "minimumGallons", updated_at AS "updatedAt"`, [hobbsMinimum, orlaMinimum]);
+    sendJson(response, 200, { tanks: result.rows }); return true;
+  }
+  if (url.pathname === '/api/fuel-inventory/movements' && request.method === 'GET') {
+    if (!await requireStaff(request, response)) return true;
+    const movements = await pool.query(`SELECT m.movement_id AS id, m.created_at AS "createdAt", m.tank_location AS "tankLocation", m.movement_type AS "movementType", m.gallons, m.balance_after AS "balanceAfter",
+      COALESCE(p.recorded_by_email, a.recorded_by_email, f.driver_name, 'Sistema') AS "recordedBy",
+      CASE
+        WHEN m.movement_type = 'purchase' THEN 'Compra de diésel'
+        WHEN m.movement_type = 'fuel_load' THEN CONCAT('Carga ', COALESCE(f.folio, 'registrada'), ' · Unidad ', COALESCE(f.unit_number, ''))
+        WHEN m.movement_type = 'adjustment_in' THEN CONCAT('Ajuste de entrada: ', COALESCE(a.reason, 'Sin motivo'))
+        ELSE CONCAT('Ajuste de salida: ', COALESCE(a.reason, 'Sin motivo'))
+      END AS detail,
+      p.invoice_url AS "invoiceUrl"
+      FROM fuel_inventory_movements m
+      LEFT JOIN fuel_purchases p ON p.id = m.reference_id AND m.movement_type = 'purchase'
+      LEFT JOIN fuel_inventory_adjustments a ON a.id = m.reference_id AND m.movement_type IN ('adjustment_in', 'adjustment_out')
+      LEFT JOIN fuel_records f ON f.id = m.reference_id AND m.movement_type = 'fuel_load'
+      ORDER BY m.created_at DESC, m.movement_id DESC LIMIT 100`);
+    sendJson(response, 200, movements.rows); return true;
+  }
+  if (url.pathname === '/api/fuel-inventory/adjustments' && request.method === 'POST') {
+    const session = await requireStaff(request, response);
+    if (!session) return true;
+    if (session.role !== 'admin') { sendJson(response, 403, { error: 'Los ajustes de inventario requieren acceso de administradora.' }); return true; }
+    const body = await readJson(request);
+    const location = cleanText(body.tankLocation, 20), direction = cleanText(body.direction, 10), gallons = Number(body.gallons), reason = cleanText(body.reason, 240);
+    if (!['Hobbs', 'Orla'].includes(location) || !['in', 'out'].includes(direction) || !Number.isFinite(gallons) || gallons <= 0 || gallons > 100_000 || !reason) { sendJson(response, 400, { error: 'Completa bomba, tipo de ajuste, galones y motivo.' }); return true; }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const tank = await client.query('SELECT balance_gallons AS "balanceGallons" FROM fuel_tanks WHERE location = $1 FOR UPDATE', [location]);
+      const currentBalance = Number(tank.rows[0]?.balanceGallons || 0);
+      if (!tank.rowCount || (direction === 'out' && currentBalance < gallons)) { const error = new Error(`${location} no tiene diésel suficiente para descontar ${gallons} galones.`); error.code = 'INSUFFICIENT_TANK_FUEL'; throw error; }
+      const signedGallons = direction === 'in' ? gallons : -gallons;
+      const updated = await client.query('UPDATE fuel_tanks SET balance_gallons = balance_gallons + $1, updated_at = NOW() WHERE location = $2 RETURNING balance_gallons AS "balanceGallons"', [signedGallons, location]);
+      const adjustment = await client.query(`INSERT INTO fuel_inventory_adjustments (id, tank_location, direction, gallons, reason, recorded_by_role, recorded_by_email)
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at AS "createdAt"`, [crypto.randomUUID(), location, direction, gallons, reason, session.role, session.email || null]);
+      await client.query('INSERT INTO fuel_inventory_movements (tank_location, movement_type, gallons, balance_after, reference_id) VALUES ($1, $2, $3, $4, $5)', [location, direction === 'in' ? 'adjustment_in' : 'adjustment_out', signedGallons, updated.rows[0].balanceGallons, adjustment.rows[0].id]);
+      await client.query('COMMIT');
+      sendJson(response, 201, { balanceGallons: updated.rows[0].balanceGallons });
+    } catch (error) { await client.query('ROLLBACK'); if (error.code === 'INSUFFICIENT_TANK_FUEL') sendJson(response, 422, { error: error.message }); else throw error; }
+    finally { client.release(); }
+    return true;
   }
   if (url.pathname === '/api/fuel-purchases' && request.method === 'GET') {
     if (!await requireStaff(request, response)) return true;

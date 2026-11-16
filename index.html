@@ -171,9 +171,15 @@
           </div>
         </div>
         <div class="tank-balance-grid" aria-label="Existencia por bomba">
-          <div class="tank-balance"><span>Bomba C&C</span><strong>Hobbs</strong><b id="hobbs-tank-balance">0 gal</b></div>
-          <div class="tank-balance"><span>Bomba C&C</span><strong>Orla</strong><b id="orla-tank-balance">0 gal</b></div>
+          <div id="hobbs-tank-card" class="tank-balance"><span>Bomba C&C</span><strong>Hobbs</strong><b id="hobbs-tank-balance">0 gal</b><p id="hobbs-tank-alert" class="tank-alert">Sin alertas</p></div>
+          <div id="orla-tank-card" class="tank-balance"><span>Bomba C&C</span><strong>Orla</strong><b id="orla-tank-balance">0 gal</b><p id="orla-tank-alert" class="tank-alert">Sin alertas</p></div>
         </div>
+        <form id="fuel-minimums-form" class="fuel-minimums-form" hidden>
+          <strong>Alertar cuando queden menos de:</strong>
+          <label>Hobbs<input id="hobbs-minimum-gallons" type="number" min="0" max="100000" step="0.01" inputmode="decimal" /></label>
+          <label>Orla<input id="orla-minimum-gallons" type="number" min="0" max="100000" step="0.01" inputmode="decimal" /></label>
+          <button class="secondary-button" type="submit">Guardar mínimos</button>
+        </form>
         <div class="divider"></div>
         <div class="records-heading purchase-heading">
           <div><p class="eyebrow">Nueva compra</p><h3>Registrar recarga de bomba</h3><p class="muted">La factura y los galones son obligatorios.</p></div>
@@ -192,9 +198,24 @@
           <button id="save-fuel-purchase" class="primary-button" type="submit">Guardar compra</button>
         </form>
         <p id="fuel-purchase-error" class="error" role="alert"></p>
+        <div id="inventory-adjustment-panel" class="inventory-adjustment" hidden>
+          <div class="records-heading"><div><p class="eyebrow">Corrección controlada</p><h3>Ajustar inventario</h3><p class="muted">No modifica registros previos; deja una bitácora con el motivo.</p></div></div>
+          <form id="fuel-adjustment-form" class="fuel-adjustment-form" novalidate>
+            <label>Bomba<select id="adjustment-tank-location"><option value="">Selecciona bomba</option><option value="Hobbs">Hobbs</option><option value="Orla">Orla</option></select></label>
+            <label>Tipo<select id="adjustment-direction"><option value="">Selecciona tipo</option><option value="in">Agregar galones</option><option value="out">Descontar galones</option></select></label>
+            <label>Galones<input id="adjustment-gallons" type="number" min="0.01" max="100000" step="0.01" inputmode="decimal" placeholder="Ej. 25" /></label>
+            <label class="adjustment-reason">Motivo obligatorio<input id="adjustment-reason" type="text" maxlength="240" placeholder="Ej. Corrección por lectura física de tanque" /></label>
+            <button id="save-inventory-adjustment" class="secondary-button" type="submit">Guardar ajuste</button>
+          </form>
+          <p id="fuel-adjustment-error" class="error" role="alert"></p>
+        </div>
         <div class="driver-assignment-log">
           <div class="records-heading"><div><p class="eyebrow">Historial</p><h3>Compras recientes</h3></div></div>
           <div class="table-wrap"><table class="fuel-purchase-table"><thead><tr><th>Fecha</th><th>Bomba</th><th>Galones</th><th>Factura</th><th>Registró</th></tr></thead><tbody id="fuel-purchases-body"><tr class="empty"><td colspan="5">Aún no hay compras registradas.</td></tr></tbody></table></div>
+        </div>
+        <div class="driver-assignment-log">
+          <div class="records-heading"><div><p class="eyebrow">Bitácora de existencias</p><h3>Movimientos por bomba</h3><p class="muted">Incluye compras, cargas de unidades y ajustes autorizados.</p></div></div>
+          <div class="table-wrap"><table class="fuel-movements-table"><thead><tr><th>Fecha</th><th>Bomba</th><th>Movimiento</th><th>Galones</th><th>Saldo</th><th>Detalle / responsable</th></tr></thead><tbody id="fuel-movements-body"><tr class="empty"><td colspan="6">Aún no hay movimientos registrados.</td></tr></tbody></table></div>
         </div>
       </section>
 

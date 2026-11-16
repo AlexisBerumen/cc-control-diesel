@@ -27,6 +27,7 @@ let reconciliationPage = 1;
 let driverAssignmentLog = [];
 let fuelInventory = [];
 let fuelPurchases = [];
+let fuelInventoryMovements = [];
 let unitCatalogPage = 1;
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
@@ -40,6 +41,13 @@ function money(value) { return new Intl.NumberFormat('es-MX', { style: 'currency
 function number(value) { return new Intl.NumberFormat('es-MX', { maximumFractionDigits: 2 }).format(Number(value || 0)); }
 function fuelSourceLabel(source) { return source === 'hobbs' ? 'Bomba C&C — Hobbs' : source === 'orla' ? 'Bomba C&C — Orla' : source === 'pilot' ? 'Pilot' : 'No indicado'; }
 function tankBalance(location) { return Number(fuelInventory.find((tank) => tank.location === location)?.balanceGallons || 0); }
+function tankMinimum(location) { return Number(fuelInventory.find((tank) => tank.location === location)?.minimumGallons ?? 500); }
+function tankStatus(location) {
+  const balance = tankBalance(location), minimum = tankMinimum(location);
+  if (balance <= 0) return { level: 'critical', text: 'Sin diésel disponible. Registra una compra antes de cargar.' };
+  if (balance <= minimum) return { level: 'warning', text: `Inventario bajo. Mínimo configurado: ${number(minimum)} gal.` };
+  return { level: 'okay', text: `Nivel normal. Mínimo configurado: ${number(minimum)} gal.` };
+}
 function odometerValue() { return Number($('#odometer').value.replace(/[^0-9]/g, '')); }
 function formatOdometerInput() {
   const input = $('#odometer');
@@ -55,8 +63,18 @@ async function uploadEvidence(file, kind) {
   return data;
 }
 function renderFuelInventory() {
-  $('#hobbs-tank-balance').textContent = `${number(tankBalance('Hobbs'))} gal`;
-  $('#orla-tank-balance').textContent = `${number(tankBalance('Orla'))} gal`;
+  ['Hobbs', 'Orla'].forEach((location) => {
+    const key = location.toLowerCase();
+    const status = tankStatus(location);
+    const card = $(`#${key}-tank-card`);
+    $(`#${key}-tank-balance`).textContent = `${number(tankBalance(location))} gal`;
+    $(`#${key}-tank-alert`).textContent = status.text;
+    $(`#${key}-tank-alert`).className = `tank-alert ${status.level}`;
+    card.classList.remove('tank-okay', 'tank-warning', 'tank-critical');
+    card.classList.add(`tank-${status.level}`);
+    const minimumInput = $(`#${key}-minimum-gallons`);
+    if (minimumInput && document.activeElement !== minimumInput) minimumInput.value = tankMinimum(location);
+  });
   updateFuelSourceFields();
 }
 function renderFuelPurchases() {
@@ -64,6 +82,21 @@ function renderFuelPurchases() {
   body.innerHTML = fuelPurchases.length
     ? fuelPurchases.map((purchase) => `<tr><td>${new Date(purchase.createdAt).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</td><td><strong>${esc(purchase.tankLocation)}</strong></td><td>${number(purchase.gallons)} gal</td><td><a class="evidence-link" href="${esc(purchase.invoiceUrl)}" target="_blank" rel="noopener">Factura (clic aquí)</a></td><td>${esc(purchase.recordedByEmail || 'Sesión autorizada')}</td></tr>`).join('')
     : '<tr class="empty"><td colspan="5">Aún no hay compras registradas.</td></tr>';
+}
+function movementLabel(type) {
+  return ({ purchase: 'Compra de diésel', fuel_load: 'Carga de unidad', adjustment_in: 'Ajuste: entrada', adjustment_out: 'Ajuste: salida' })[type] || type;
+}
+function renderFuelInventoryMovements() {
+  const body = $('#fuel-movements-body');
+  body.innerHTML = fuelInventoryMovements.length
+    ? fuelInventoryMovements.map((movement) => {
+      const gallons = Number(movement.gallons || 0);
+      const directionClass = gallons >= 0 ? 'movement-positive' : 'movement-negative';
+      const sign = gallons >= 0 ? '+' : '−';
+      const invoice = movement.invoiceUrl ? `<br><a class="evidence-link" href="${esc(movement.invoiceUrl)}" target="_blank" rel="noopener">Factura (clic aquí)</a>` : '';
+      return `<tr><td>${new Date(movement.createdAt).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</td><td><strong>${esc(movement.tankLocation)}</strong></td><td>${esc(movementLabel(movement.movementType))}</td><td class="${directionClass}">${sign}${number(Math.abs(gallons))} gal</td><td>${number(movement.balanceAfter)} gal</td><td>${esc(movement.detail || 'Sin detalle')}<br><small>${esc(movement.recordedBy || 'Sistema')}</small>${invoice}</td></tr>`;
+    }).join('')
+    : '<tr class="empty"><td colspan="6">Aún no hay movimientos registrados.</td></tr>';
 }
 async function loadFuelInventory() {
   const response = await fetch('/api/fuel-inventory');
@@ -78,6 +111,13 @@ async function loadFuelPurchases() {
   if (!response.ok) throw new Error(data.error || 'No fue posible consultar las compras de diésel.');
   fuelPurchases = data;
   renderFuelPurchases();
+}
+async function loadFuelInventoryMovements() {
+  const response = await fetch('/api/fuel-inventory/movements');
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No fue posible consultar los movimientos de inventario.');
+  fuelInventoryMovements = data;
+  renderFuelInventoryMovements();
 }
 
 function lastOdometer(unitId) {
@@ -508,7 +548,10 @@ function updateFuelSourceFields() {
   $('#amount').previousElementSibling.textContent = pilot ? 'Importe total (MXN, obligatorio)' : 'Importe total (MXN, opcional)';
   $('#amount-help').textContent = pilot ? 'En Pilot debes registrar el importe total del ticket.' : 'Déjalo vacío si la carga fue en la bomba de la empresa.';
   if (!pilot) { $('#station').value = ''; $('#amount').value = ''; setError('#station-error', ''); setError('#amount-error', ''); }
-  if (localTank) $('#fuel-source-note').textContent = `Disponible en ${localTank}: ${number(tankBalance(localTank))} galones.`;
+  if (localTank) {
+    const status = tankStatus(localTank);
+    $('#fuel-source-note').textContent = `Disponible en ${localTank}: ${number(tankBalance(localTank))} galones.${status.level === 'okay' ? '' : ` ⚠ ${status.text}`}`;
+  }
   else if (pilot) $('#fuel-source-note').textContent = 'Indica la ubicación de Pilot y el importe total del ticket.';
   else $('#fuel-source-note').textContent = 'Selecciona la bomba o gasolinera donde cargaste.';
 }
@@ -603,9 +646,55 @@ $('#fuel-purchase-form').addEventListener('submit', async (event) => {
     event.currentTarget.reset();
     $('#purchase-invoice-box').classList.remove('has-file');
     $('#purchase-invoice-box .file-name').textContent = 'Tomar o seleccionar foto';
-    await Promise.all([loadFuelInventory(), loadFuelPurchases()]);
+    await Promise.all([loadFuelInventory(), loadFuelPurchases(), loadFuelInventoryMovements()]);
     showToast(`Compra registrada. ${location} tiene ${number(data.balanceGallons)} galones disponibles.`);
   } catch (purchaseError) { error.textContent = purchaseError.message || 'No fue posible registrar la compra de diésel.'; }
+  finally { button.disabled = false; }
+});
+
+$('#fuel-minimums-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const hobbsMinimum = Number($('#hobbs-minimum-gallons').value);
+  const orlaMinimum = Number($('#orla-minimum-gallons').value);
+  if (![hobbsMinimum, orlaMinimum].every((value) => Number.isFinite(value) && value >= 0 && value <= 100000)) {
+    showToast('Indica mínimos entre 0 y 100,000 galones.');
+    return;
+  }
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/fuel-inventory/minimums', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hobbsMinimum, orlaMinimum }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible guardar los mínimos.');
+    fuelInventory = data.tanks || fuelInventory;
+    renderFuelInventory();
+    showToast('Mínimos de alerta actualizados.');
+  } catch (error) { showToast(error.message || 'No fue posible guardar los mínimos.'); }
+  finally { button.disabled = false; }
+});
+
+$('#fuel-adjustment-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const tankLocation = $('#adjustment-tank-location').value;
+  const direction = $('#adjustment-direction').value;
+  const gallons = Number($('#adjustment-gallons').value);
+  const reason = $('#adjustment-reason').value.trim();
+  const error = $('#fuel-adjustment-error');
+  error.textContent = '';
+  if (!['Hobbs', 'Orla'].includes(tankLocation) || !['in', 'out'].includes(direction) || !Number.isFinite(gallons) || gallons <= 0 || !reason) {
+    error.textContent = 'Selecciona la bomba, tipo de ajuste, galones y escribe el motivo.';
+    return;
+  }
+  const button = $('#save-inventory-adjustment');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/fuel-inventory/adjustments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tankLocation, direction, gallons, reason }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible guardar el ajuste.');
+    event.currentTarget.reset();
+    await Promise.all([loadFuelInventory(), loadFuelInventoryMovements()]);
+    showToast(`Ajuste guardado. ${tankLocation} queda con ${number(data.balanceGallons)} galones.`);
+  } catch (adjustmentError) { error.textContent = adjustmentError.message || 'No fue posible guardar el ajuste.'; }
   finally { button.disabled = false; }
 });
 
@@ -658,7 +747,10 @@ $('#confirm-button').addEventListener('click', async e => {
     try { await loadRecordsPage(1); }
     catch { /* La carga ya se guardó; el historial se actualizará al volver a abrirlo. */ }
   }
-  try { await loadFuelInventory(); } catch { /* La carga ya se guardó; el saldo se actualizará al recargar. */ }
+  try {
+    await loadFuelInventory();
+    if (isAdmin) await loadFuelInventoryMovements();
+  } catch { /* La carga ya se guardó; el saldo se actualizará al recargar. */ }
   $('#confirm-dialog').close();
   resetFuelForm();
   $('#success-folio').textContent = `Folio de carga: ${saved.folio}`;
@@ -836,6 +928,8 @@ function setAdminInterface(authenticated, role = null) {
   $('#asignar-chofer').hidden = !authenticated;
   $('#unidades').hidden = !authenticated;
   $('#unit-form').hidden = role !== 'admin';
+  $('#fuel-minimums-form').hidden = role !== 'admin';
+  $('#inventory-adjustment-panel').hidden = role !== 'admin';
   $('#reconciliation-link').hidden = !authenticated;
   $('#fuel-inventory-link').hidden = !authenticated;
   $('#driver-assignment-link').hidden = !authenticated;
@@ -863,7 +957,7 @@ async function synchronizeWithDatabase() {
     renderFuelInventory();
     if (admin) {
       if (!$('#reconciliation-date-from').value || !$('#reconciliation-date-to').value) setDefaultReconciliationRange();
-      await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog(), loadFuelPurchases()]);
+      await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog(), loadFuelPurchases(), loadFuelInventoryMovements()]);
     } else {
       records = [];
       recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
@@ -875,6 +969,8 @@ async function synchronizeWithDatabase() {
       renderDriverAssignmentLog();
       fuelPurchases = [];
       renderFuelPurchases();
+      fuelInventoryMovements = [];
+      renderFuelInventoryMovements();
     }
     renderUnitCatalog(); updateReview();
   } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
@@ -916,12 +1012,15 @@ $('#logout-button').addEventListener('click', async () => {
   reconciliationData = null;
   driverAssignmentLog = [];
   fuelPurchases = [];
+  fuelInventoryMovements = [];
   localStorage.removeItem(STORAGE.records);
   setAdminInterface(false);
   renderRecords();
   renderReconciliation();
+  renderFuelPurchases();
+  renderFuelInventoryMovements();
   location.hash = '#registro';
   showToast('Sesión cerrada.');
 });
 
-setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); renderFuelInventory(); renderFuelPurchases(); updateFuelSourceFields(); updateReview(); synchronizeWithDatabase();
+setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements(); updateFuelSourceFields(); updateReview(); synchronizeWithDatabase();
