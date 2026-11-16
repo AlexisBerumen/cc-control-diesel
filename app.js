@@ -502,11 +502,12 @@ function updateFuelSourceFields() {
   const pilot = source === 'pilot';
   const localTank = source === 'hobbs' ? 'Hobbs' : source === 'orla' ? 'Orla' : '';
   $('#pilot-location-field').hidden = !pilot;
+  $('#pilot-amount-field').hidden = !pilot;
   $('#station').required = pilot;
   $('#amount').required = pilot;
   $('#amount').previousElementSibling.textContent = pilot ? 'Importe total (MXN, obligatorio)' : 'Importe total (MXN, opcional)';
   $('#amount-help').textContent = pilot ? 'En Pilot debes registrar el importe total del ticket.' : 'Déjalo vacío si la carga fue en la bomba de la empresa.';
-  if (!pilot) { $('#station').value = ''; setError('#station-error', ''); }
+  if (!pilot) { $('#station').value = ''; $('#amount').value = ''; setError('#station-error', ''); setError('#amount-error', ''); }
   if (localTank) $('#fuel-source-note').textContent = `Disponible en ${localTank}: ${number(tankBalance(localTank))} galones.`;
   else if (pilot) $('#fuel-source-note').textContent = 'Indica la ubicación de Pilot y el importe total del ticket.';
   else $('#fuel-source-note').textContent = 'Selecciona la bomba o gasolinera donde cargaste.';
