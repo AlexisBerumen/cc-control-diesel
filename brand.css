@@ -23,6 +23,9 @@ body { background: radial-gradient(circle at 6% 0%, #e7edff 0, transparent 30rem
 .login-landing h1 { max-width: 620px; color: #122760; font: 700 clamp(38px, 4.3vw, 65px)/.98 Outfit, sans-serif; letter-spacing: -2.4px; }
 .login-landing h1 span { color: #e1283c; }
 .login-hero-intro { max-width: 565px; margin: 25px 0 29px; color: #566a8d; font-size: 18px; line-height: 1.58; }
+.login-hero-actions { display: flex; justify-content: center; max-width: 565px; margin: 0 0 29px; }
+.login-hero-actions .primary-button { min-width: 236px; min-height: 51px; border-color: #d61f36; border-radius: 10px; background: linear-gradient(100deg, #ed3146, #c91930); box-shadow: 0 12px 24px #d51e3530; font-size: 15px; }
+.login-hero-actions .primary-button:hover { border-color: #b8172c; background: linear-gradient(100deg, #d8263a, #ad1228); transform: translateY(-1px); }
 .login-benefits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 670px; }
 .login-benefits > div { min-height: 114px; padding: 16px 13px; border: 1px solid #dbe2f3; border-radius: 13px; background: #ffffffa8; box-shadow: 0 9px 24px #1428600a; }
 .login-benefits span { display: grid; place-items: center; width: 23px; height: 23px; margin-bottom: 10px; border-radius: 50%; background: #e8f6ee; color: #176747; font-size: 13px; font-weight: 800; }
@@ -235,6 +238,8 @@ th { background: #eef2ff; color: #324a91; }
   .login-landing { min-height: calc(100vh - 76px); padding: 42px 21px 52px; }
   .login-landing h1 { font-size: 38px; letter-spacing: -1.5px; }
   .login-hero-intro { margin: 18px 0 23px; font-size: 16px; }
+  .login-hero-actions { margin-bottom: 23px; }
+  .login-hero-actions .primary-button { width: 100%; }
   .login-benefits { grid-template-columns: 1fr; }
   .login-benefits > div { min-height: auto; display: flex; gap: 10px; align-items: flex-start; padding: 12px; }
   .login-benefits span { flex: 0 0 23px; margin: 0; }

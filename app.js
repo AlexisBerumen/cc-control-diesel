@@ -937,7 +937,7 @@ function setAdminInterface(authenticated, role = null) {
   $('#fuel-inventory-link').hidden = !authenticated;
   $('#driver-assignment-link').hidden = !authenticated;
   $('#units-link').hidden = !authenticated;
-  $('#login-button').hidden = authenticated;
+  $('#login-button').hidden = true;
   $('#logout-button').hidden = !authenticated;
 }
 function openLoginDialog() {
@@ -950,8 +950,7 @@ async function updateSession() {
     const response = await fetch('/api/auth/status');
     const data = await response.json();
     setAdminInterface(Boolean(data.authenticated), data.role);
-    if (!data.authenticated) openLoginDialog();
-  } catch { setAdminInterface(false); openLoginDialog(); }
+  } catch { setAdminInterface(false); }
   return isAdmin;
 }
 async function synchronizeWithDatabase() {
@@ -993,6 +992,7 @@ $('#records-link').addEventListener('click', (event) => {
 $('#login-button').addEventListener('click', () => {
   openLoginDialog();
 });
+$('#landing-login-button').addEventListener('click', openLoginDialog);
 $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = $('#login-submit');
@@ -1032,7 +1032,6 @@ $('#logout-button').addEventListener('click', async () => {
   renderFuelPurchases();
   renderFuelInventoryMovements();
   location.hash = '#registro';
-  setTimeout(openLoginDialog, 0);
   showToast('Sesión cerrada.');
 });
 
