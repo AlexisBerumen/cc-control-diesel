@@ -182,11 +182,36 @@ function screenshot(slide, imagePath, x, y, w, h) {
   addText(s, 'Pilot: tarjeta solo para personal autorizado; toda solicitud requiere autorización previa.', 0.98, 5.54, 11.25, 0.2, { fontSize: 16, color: C.white, bold: true, align: 'center' });
 }
 
-// 7. Motive and reconciliation
+// 7. Pilot card policy
 {
   const s = pptx.addSlide();
   s.background = { color: C.white };
-  header(s, 'Integración', 'Motive aporta el contexto operativo', 7);
+  header(s, 'Política de uso', 'Tarjetas Pilot: uso autorizado y controlado', 7);
+  addText(s, 'Las tarjetas Pilot permiten atender cargas fuera de las bombas C&C. Por ello su entrega y uso requieren control previo.', 0.62, 1.25, 11.45, 0.38, { fontSize: 16, color: C.muted, breakLine: true });
+
+  const rules = [
+    ['1', 'Solo personal autorizado', 'Las tarjetas las portan y utilizan exclusivamente las personas designadas por la empresa.', C.navy],
+    ['2', 'Autorización antes de solicitar', 'Antes de pedir una tarjeta debe existir autorización previa del responsable correspondiente.', C.red],
+    ['3', 'Registro completo de la carga', 'Al usar Pilot se captura ubicación, importe obligatorio, galones y evidencias para dar seguimiento.', C.green]
+  ];
+  rules.forEach(([number, title, detail, color], index) => {
+    const y = 2.02 + index * 1.2;
+    addRect(s, 0.85, y, 11.55, 0.92, 'F8FAFF', C.line, 0.14);
+    s.addShape(pptx.ShapeType.ellipse, { x: 1.13, y: y + 0.19, w: 0.5, h: 0.5, fill: { color }, line: { color, transparency: 100 } });
+    addText(s, number, 1.13, y + 0.35, 0.5, 0.12, { fontSize: 10, color: C.white, bold: true, align: 'center' });
+    addText(s, title, 1.92, y + 0.18, 3.8, 0.2, { fontSize: 15, color: C.navy, bold: true });
+    addText(s, detail, 5.15, y + 0.18, 6.72, 0.42, { fontSize: 12.3, color: C.muted, breakLine: true });
+  });
+
+  addRect(s, 0.85, 5.92, 11.55, 0.58, C.paleGold, 'EAB64D', 0.12);
+  addText(s, 'Mensaje para operación: si no cuentas con autorización previa, no solicites ni utilices una tarjeta Pilot.', 1.08, 6.13, 11.05, 0.18, { fontSize: 13.5, color: '8A5B00', bold: true, align: 'center' });
+}
+
+// 8. Motive and reconciliation
+{
+  const s = pptx.addSlide();
+  s.background = { color: C.white };
+  header(s, 'Integración', 'Motive aporta el contexto operativo', 8);
   addText(s, 'La sincronización alimenta el catálogo y permite comparar los registros de combustible contra la operación de cada unidad.', 0.62, 1.25, 11.2, 0.32, { fontSize: 16, color: C.muted });
   const flow = [
     ['Motive', 'Unidades · choferes · odómetros'],
@@ -206,11 +231,11 @@ function screenshot(slide, imagePath, x, y, w, h) {
   addText(s, 'Resultado esperado: identificar inconsistencias de kilometraje, consumo o captura para revisarlas oportunamente.', 1.75, 5.38, 9.82, 0.26, { fontSize: 15, color: C.green, bold: true, align: 'center' });
 }
 
-// 8. Governance
+// 9. Governance
 {
   const s = pptx.addSlide();
   s.background = { color: C.paper };
-  header(s, 'Seguridad y seguimiento', 'Información con acceso y trazabilidad', 8);
+  header(s, 'Seguridad y seguimiento', 'Información con acceso y trazabilidad', 9);
   const columns = [
     ['Acceso actual', 'La plataforma está cerrada. Por ahora solo la cuenta administradora puede entrar.', C.navy],
     ['Bitácora', 'Las compras, cargas y ajustes dejan fecha, responsable, motivo y saldo posterior.', C.green],
@@ -226,7 +251,7 @@ function screenshot(slide, imagePath, x, y, w, h) {
   });
 }
 
-// 9. Close / next steps
+// 10. Close / next steps
 {
   const s = pptx.addSlide();
   s.background = { color: C.navyDark };
