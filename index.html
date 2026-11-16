@@ -335,19 +335,13 @@
               <option value="offboarding">Baja de chofer</option>
               <option value="temporary_assignment">Cambio temporal de unidad</option>
               <option value="permanent_assignment">Cambio permanente de unidad</option>
+              <option value="time_off">Time Off / descanso</option>
               <option value="unreported_change">Movimiento no notificado</option>
               <option value="weekly_review">Confirmación semanal</option>
             </select>
           </label>
           <label>Fecha efectiva
             <input id="personnel-effective-date" type="date" required />
-          </label>
-          <label>Tipo de asignación
-            <select id="personnel-assignment-type">
-              <option value="not_applicable">No aplica</option>
-              <option value="temporary">Temporal</option>
-              <option value="permanent">Permanente</option>
-            </select>
           </label>
           <div>
             <label for="personnel-driver-search">Chofer</label>
@@ -390,7 +384,7 @@
             <div><p class="eyebrow">Seguimiento</p><h3>Bitácora de movimientos</h3><p class="muted">Filtra y actualiza el estado conforme se revise cada caso.</p></div>
           </div>
           <div class="personnel-filters">
-            <label>Movimiento<select id="personnel-movement-filter"><option value="">Todos los movimientos</option><option value="onboarding">Altas</option><option value="offboarding">Bajas</option><option value="temporary_assignment">Cambios temporales</option><option value="permanent_assignment">Cambios permanentes</option><option value="unreported_change">No notificados</option><option value="weekly_review">Confirmaciones semanales</option></select></label>
+            <label>Movimiento<select id="personnel-movement-filter"><option value="">Todos los movimientos</option><option value="onboarding">Altas</option><option value="offboarding">Bajas</option><option value="temporary_assignment">Cambios temporales</option><option value="permanent_assignment">Cambios permanentes</option><option value="time_off">Time Off / descanso</option><option value="unreported_change">No notificados</option><option value="weekly_review">Confirmaciones semanales</option></select></label>
             <label>Estado<select id="personnel-status-filter"><option value="">Todos los estados</option><option value="pending">Pendientes</option><option value="reviewed">Revisados</option><option value="approved">Aprobados</option></select></label>
             <button id="personnel-clear-filters" class="filter-link" type="button">Limpiar filtros</button>
           </div>

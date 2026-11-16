@@ -297,7 +297,7 @@ async function loadDriverAssignmentLog() {
   renderDriverAssignmentLog();
 }
 function personnelMovementLabel(type) {
-  return ({ onboarding: 'Alta de chofer', offboarding: 'Baja de chofer', temporary_assignment: 'Cambio temporal', permanent_assignment: 'Cambio permanente', unreported_change: 'Movimiento no notificado', weekly_review: 'Confirmación semanal' })[type] || 'Movimiento';
+  return ({ onboarding: 'Alta de chofer', offboarding: 'Baja de chofer', temporary_assignment: 'Cambio temporal', permanent_assignment: 'Cambio permanente', time_off: 'Time Off / descanso', unreported_change: 'Movimiento no notificado', weekly_review: 'Confirmación semanal' })[type] || 'Movimiento';
 }
 function personnelStatusLabel(status) {
   return ({ pending: 'Pendiente', reviewed: 'Revisado', approved: 'Aprobado' })[status] || 'Pendiente';
@@ -348,7 +348,7 @@ function renderPersonnelControl() {
   body.innerHTML = personnelReports.length
     ? personnelReports.map((report) => `<tr>
       <td>${new Date(String(report.effectiveDate).length === 10 ? `${report.effectiveDate}T12:00:00` : report.effectiveDate).toLocaleDateString('es-MX')}<br><small>Capturado: ${new Date(report.createdAt).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</small></td>
-      <td><strong>${esc(personnelMovementLabel(report.movementType))}</strong><br><small>${esc(report.assignmentType === 'temporary' ? 'Asignación temporal' : report.assignmentType === 'permanent' ? 'Asignación permanente' : 'Sin cambio de asignación')}</small></td>
+      <td><strong>${esc(personnelMovementLabel(report.movementType))}</strong></td>
       <td><strong>${esc(report.driverName)}</strong><br><small>${report.unitNumber ? `Unidad ${esc(report.unitNumber)}` : 'Sin unidad asignada'}</small></td>
       <td>${esc(report.reason)}${report.notes ? `<br><small>${esc(report.notes)}</small>` : ''}</td>
       <td>${esc(report.reportedByEmail || 'Personal autorizado')}</td>
@@ -386,7 +386,7 @@ function renderPersonnelDraft() {
   saveButton.disabled = !count;
   saveButton.textContent = count ? `Guardar reporte semanal (${count})` : 'Guardar reporte semanal';
   body.innerHTML = count
-    ? personnelDraftItems.map((item, index) => `<tr><td><strong>${esc(item.driverName)}</strong><br><small>${new Date(`${item.effectiveDate}T12:00:00`).toLocaleDateString('es-MX')}</small></td><td>${item.unitNumber ? `Unidad ${esc(item.unitNumber)}` : '<small>Sin unidad</small>'}</td><td>${esc(personnelMovementLabel(item.movementType))}<br><small>${esc(item.assignmentType === 'temporary' ? 'Temporal' : item.assignmentType === 'permanent' ? 'Permanente' : 'No aplica')}</small></td><td>${esc(item.reason)}${item.notes ? `<br><small>${esc(item.notes)}</small>` : ''}</td><td><button class="personnel-draft-remove" type="button" data-personnel-draft-index="${index}">Quitar</button></td></tr>`).join('')
+    ? personnelDraftItems.map((item, index) => `<tr><td><strong>${esc(item.driverName)}</strong><br><small>${new Date(`${item.effectiveDate}T12:00:00`).toLocaleDateString('es-MX')}</small></td><td>${item.unitNumber ? `Unidad ${esc(item.unitNumber)}` : '<small>Sin unidad</small>'}</td><td>${esc(personnelMovementLabel(item.movementType))}</td><td>${esc(item.reason)}${item.notes ? `<br><small>${esc(item.notes)}</small>` : ''}</td><td><button class="personnel-draft-remove" type="button" data-personnel-draft-index="${index}">Quitar</button></td></tr>`).join('')
     : '<tr class="empty"><td colspan="5">Aún no hay movimientos agregados a la lista.</td></tr>';
 }
 function reconciliationStatusText(row) {
@@ -566,7 +566,6 @@ $('#personnel-control-form').addEventListener('submit', async (event) => {
   personnelDraftItems.push({
     movementType,
     effectiveDate: $('#personnel-effective-date').value,
-    assignmentType: $('#personnel-assignment-type').value,
     driverId: personnelSelectedDriver?.id || '',
     driverName,
     unitId: personnelSelectedUnit?.id || '',

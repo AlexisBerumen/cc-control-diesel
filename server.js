@@ -155,7 +155,7 @@ async function initializeDatabase() {
       batch_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       effective_date DATE NOT NULL,
-      movement_type TEXT NOT NULL CHECK (movement_type IN ('onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'unreported_change', 'weekly_review')),
+      movement_type TEXT NOT NULL CHECK (movement_type IN ('onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'time_off', 'unreported_change', 'weekly_review')),
       driver_id TEXT REFERENCES drivers(id),
       driver_name TEXT NOT NULL,
       unit_id TEXT REFERENCES units(id),
@@ -239,6 +239,8 @@ async function initializeDatabase() {
     ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS email TEXT;
     ALTER TABLE driver_assignment_log ADD COLUMN IF NOT EXISTS actor_email TEXT;`);
   await pool.query('ALTER TABLE personnel_control_reports ADD COLUMN IF NOT EXISTS batch_id TEXT');
+  await pool.query('ALTER TABLE personnel_control_reports DROP CONSTRAINT IF EXISTS personnel_control_reports_movement_type_check');
+  await pool.query("ALTER TABLE personnel_control_reports ADD CONSTRAINT personnel_control_reports_movement_type_check CHECK (movement_type IN ('onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'time_off', 'unreported_change', 'weekly_review'))");
   await pool.query('CREATE INDEX IF NOT EXISTS personnel_control_reports_batch_idx ON personnel_control_reports (batch_id, report_id)');
   for (const unit of loadSeedUnits()) await pool.query('INSERT INTO units (id, number, identifier, description) VALUES ($1, $2, $3, $4) ON CONFLICT (number) DO NOTHING', [unit.id, unit.number, unit.identifier, unit.description]);
   await pool.query("INSERT INTO fuel_tanks (location, balance_gallons) VALUES ('Hobbs', 0), ('Orla', 0) ON CONFLICT (location) DO NOTHING");
@@ -747,7 +749,7 @@ async function handleApi(request, response, url) {
     const status = cleanText(url.searchParams.get('status') || '', 20);
     const movementType = cleanText(url.searchParams.get('movementType') || '', 40);
     const validStatuses = ['pending', 'reviewed', 'approved'];
-    const validMovementTypes = ['onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'unreported_change', 'weekly_review'];
+    const validMovementTypes = ['onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'time_off', 'unreported_change', 'weekly_review'];
     const values = [], conditions = [];
     if (status) {
       if (!validStatuses.includes(status)) { sendJson(response, 400, { error: 'El estado seleccionado no es válido.' }); return true; }
@@ -757,7 +759,7 @@ async function handleApi(request, response, url) {
       if (!validMovementTypes.includes(movementType)) { sendJson(response, 400, { error: 'El tipo de movimiento no es válido.' }); return true; }
       values.push(movementType); conditions.push(`movement_type = $${values.length}`);
     }
-    const reports = await pool.query(`SELECT id, batch_id AS "batchId", created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", assignment_type AS "assignmentType", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"
+    const reports = await pool.query(`SELECT id, batch_id AS "batchId", created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"
       FROM personnel_control_reports ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
       ORDER BY effective_date DESC, created_at DESC, report_id DESC LIMIT 200`, values);
     sendJson(response, 200, reports.rows); return true;
@@ -766,8 +768,7 @@ async function handleApi(request, response, url) {
     const session = await requireStaff(request, response);
     if (!session) return true;
     const body = await readJson(request);
-    const validMovementTypes = ['onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'unreported_change', 'weekly_review'];
-    const validAssignmentTypes = ['temporary', 'permanent', 'not_applicable'];
+    const validMovementTypes = ['onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'time_off', 'unreported_change', 'weekly_review'];
     const items = Array.isArray(body.items) ? body.items : [body];
     if (!items.length || items.length > 100) { sendJson(response, 400, { error: 'Agrega entre 1 y 100 movimientos al reporte semanal.' }); return true; }
     const batchId = crypto.randomUUID();
@@ -780,10 +781,10 @@ async function handleApi(request, response, url) {
         const effectiveDate = cleanText(item.effectiveDate, 10);
         const requestedDriverId = cleanText(item.driverId, 100);
         const requestedUnitId = cleanText(item.unitId, 80);
-        const assignmentType = cleanText(item.assignmentType || 'not_applicable', 20);
+        const assignmentType = movementType === 'temporary_assignment' ? 'temporary' : movementType === 'permanent_assignment' ? 'permanent' : 'not_applicable';
         const reason = cleanText(item.reason, 240);
         const notes = cleanText(item.notes, 1_000) || null;
-        if (!validMovementTypes.includes(movementType) || !isIsoDate(effectiveDate) || !validAssignmentTypes.includes(assignmentType) || !reason) throw new Error('Cada movimiento debe incluir tipo, fecha efectiva, motivo y tipo de asignación válidos.');
+        if (!validMovementTypes.includes(movementType) || !isIsoDate(effectiveDate) || !reason) throw new Error('Cada movimiento debe incluir tipo, fecha efectiva y motivo válidos.');
         let driverId = null;
         let driverName = cleanText(item.driverName, 160);
         if (requestedDriverId) {
@@ -803,7 +804,7 @@ async function handleApi(request, response, url) {
         }
         const inserted = await client.query(`INSERT INTO personnel_control_reports (id, batch_id, effective_date, movement_type, driver_id, driver_name, unit_id, unit_number, assignment_type, reason, notes, status, reported_by_role, reported_by_email, status_updated_by_email)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $13)
-          RETURNING id, created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", assignment_type AS "assignmentType", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"`, [crypto.randomUUID(), batchId, effectiveDate, movementType, driverId, driverName, unitId, unitNumber, assignmentType, reason, notes, session.role || 'staff', session.email || null]);
+          RETURNING id, created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"`, [crypto.randomUUID(), batchId, effectiveDate, movementType, driverId, driverName, unitId, unitNumber, assignmentType, reason, notes, session.role || 'staff', session.email || null]);
         saved.push(inserted.rows[0]);
       }
       await client.query('COMMIT');
