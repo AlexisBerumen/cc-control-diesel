@@ -922,6 +922,7 @@ function setAdminInterface(authenticated, role = null) {
   isAdmin = authenticated;
   userRole = authenticated ? role : null;
   $('#app-content').hidden = !authenticated;
+  $('#login-landing').hidden = authenticated;
   $('#register-link').hidden = !authenticated;
   $('#registros').hidden = !authenticated;
   $('#records-link').hidden = !authenticated;
@@ -1031,6 +1032,7 @@ $('#logout-button').addEventListener('click', async () => {
   renderFuelPurchases();
   renderFuelInventoryMovements();
   location.hash = '#registro';
+  setTimeout(openLoginDialog, 0);
   showToast('Sesión cerrada.');
 });
 

@@ -31,6 +31,26 @@
       </nav>
     </header>
 
+    <section id="login-landing" class="login-landing" aria-labelledby="login-landing-title">
+      <div class="login-hero-copy">
+        <p class="eyebrow">Plataforma interna · C&amp;C Transport</p>
+        <h1 id="login-landing-title">Control de diésel<br /><span>claro, seguro y operativo.</span></h1>
+        <p class="login-hero-intro">Centraliza las cargas, evidencias, inventario de Hobbs y Orla, y la conciliación con Motive en un solo lugar.</p>
+        <div class="login-benefits" aria-label="Funciones principales">
+          <div><span>✓</span><p><strong>Registro con evidencia</strong><small>Ticket y odómetro en cada carga</small></p></div>
+          <div><span>✓</span><p><strong>Inventario por bomba</strong><small>Alertas antes de quedarse sin diésel</small></p></div>
+          <div><span>✓</span><p><strong>Información respaldada</strong><small>Sincronización y conciliación con Motive</small></p></div>
+        </div>
+        <p class="login-access-note">🔒 Acceso exclusivo para personal autorizado</p>
+      </div>
+      <div class="login-hero-visual" aria-hidden="true">
+        <div class="visual-grid"></div>
+        <div class="visual-card visual-card-main"><span>Control operativo</span><strong>Diésel</strong><small>Hobbs · Orla · Pilot</small></div>
+        <div class="visual-card visual-card-small"><span>✓</span><p>Registros<br /><b>con evidencia</b></p></div>
+        <div class="visual-ring"></div>
+      </div>
+    </section>
+
     <main id="app-content" hidden>
       <section id="registro" class="page-heading">
         <div>
@@ -335,15 +355,15 @@
     </dialog>
     <dialog id="login-dialog" class="confirmation-dialog login-dialog">
       <form method="dialog"><button class="close-dialog" value="cancel" aria-label="Cerrar">×</button></form>
-      <p class="eyebrow">Acceso privado</p>
-      <h2>Control de diésel</h2>
-      <p class="muted">Inicia sesión para acceder a la plataforma.</p>
+      <div class="login-dialog-heading"><span class="login-lock" aria-hidden="true">⌁</span><div><p class="eyebrow">Acceso privado</p><h2>Bienvenido</h2></div></div>
+      <p class="muted">Inicia sesión para acceder al control operativo de diésel.</p>
       <form id="login-form" class="login-form">
         <div><label for="login-email">Correo</label><input id="login-email" type="email" autocomplete="username" required /></div>
         <div><label for="login-password">Contraseña</label><input id="login-password" type="password" autocomplete="current-password" required /></div>
         <p id="login-error" class="error" role="alert"></p>
         <button id="login-submit" class="primary-button" type="submit">Iniciar sesión</button>
       </form>
+      <p class="login-security-note">Tu sesión es privada y vence automáticamente por seguridad.</p>
     </dialog>
     <div id="toast" class="toast" role="status"></div>
     <script src="app.js"></script>
