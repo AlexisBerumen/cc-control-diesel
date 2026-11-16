@@ -814,6 +814,20 @@ async function handleApi(request, response, url) {
       sendJson(response, 400, { error: error.message || 'No fue posible guardar el reporte semanal.' }); return true;
     } finally { client.release(); }
   }
+  const personnelBatchStatusMatch = url.pathname.match(/^\/api\/personnel-control\/batches\/([^/]+)\/status$/);
+  if (personnelBatchStatusMatch && request.method === 'PATCH') {
+    const session = await requireStaff(request, response);
+    if (!session) return true;
+    const body = await readJson(request);
+    const status = cleanText(body.status, 20);
+    if (!['pending', 'reviewed', 'approved'].includes(status)) { sendJson(response, 400, { error: 'Selecciona un estado válido.' }); return true; }
+    const batchId = decodeURIComponent(personnelBatchStatusMatch[1]);
+    const updated = await pool.query(`UPDATE personnel_control_reports SET status = $1, status_updated_at = NOW(), status_updated_by_email = $2
+      WHERE batch_id = $3 OR (batch_id IS NULL AND id = $3)
+      RETURNING id`, [status, session.email || null, batchId]);
+    if (!updated.rowCount) { sendJson(response, 404, { error: 'No se encontró el reporte semanal solicitado.' }); return true; }
+    sendJson(response, 200, { batchId, status, updatedCount: updated.rowCount }); return true;
+  }
   const personnelStatusMatch = url.pathname.match(/^\/api\/personnel-control\/([^/]+)\/status$/);
   if (personnelStatusMatch && request.method === 'PATCH') {
     const session = await requireStaff(request, response);

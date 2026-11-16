@@ -306,6 +306,22 @@ function personnelStatusBadge(status) {
   const className = status === 'approved' ? 'status' : status === 'reviewed' ? 'status-neutral' : 'status-warning';
   return `<span class="${className}">${personnelStatusLabel(status)}</span>`;
 }
+function groupPersonnelReports(reports) {
+  const batches = new Map();
+  reports.forEach((report) => {
+    const key = report.batchId || report.id;
+    const batch = batches.get(key) || { id: key, reports: [], createdAt: report.createdAt, reportedByEmail: report.reportedByEmail || '' };
+    batch.reports.push(report);
+    if (new Date(report.createdAt) > new Date(batch.createdAt)) batch.createdAt = report.createdAt;
+    if (!batch.reportedByEmail && report.reportedByEmail) batch.reportedByEmail = report.reportedByEmail;
+    batches.set(key, batch);
+  });
+  return [...batches.values()].map((batch) => {
+    const statuses = batch.reports.map((report) => report.status);
+    batch.status = statuses.every((status) => status === 'approved') ? 'approved' : statuses.every((status) => status === 'reviewed' || status === 'approved') ? 'reviewed' : 'pending';
+    return batch;
+  });
+}
 function setPersonnelDriver(driver) {
   personnelSelectedDriver = driver;
   $('#personnel-driver-search').value = driver.name;
@@ -345,16 +361,16 @@ function updatePersonnelUnitSuggestions() {
 }
 function renderPersonnelControl() {
   const body = $('#personnel-control-body');
-  body.innerHTML = personnelReports.length
-    ? personnelReports.map((report) => `<tr>
-      <td>${new Date(String(report.effectiveDate).length === 10 ? `${report.effectiveDate}T12:00:00` : report.effectiveDate).toLocaleDateString('es-MX')}<br><small>Capturado: ${new Date(report.createdAt).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</small></td>
-      <td><strong>${esc(personnelMovementLabel(report.movementType))}</strong></td>
-      <td><strong>${esc(report.driverName)}</strong><br><small>${report.unitNumber ? `Unidad ${esc(report.unitNumber)}` : 'Sin unidad asignada'}</small></td>
-      <td>${esc(report.reason)}${report.notes ? `<br><small>${esc(report.notes)}</small>` : ''}</td>
-      <td>${esc(report.reportedByEmail || 'Personal autorizado')}</td>
-      <td>${personnelStatusBadge(report.status)}<br><select class="personnel-status-select" data-personnel-status-id="${esc(report.id)}" aria-label="Actualizar estado de ${esc(report.driverName)}"><option value="pending"${report.status === 'pending' ? ' selected' : ''}>Pendiente</option><option value="reviewed"${report.status === 'reviewed' ? ' selected' : ''}>Revisado</option><option value="approved"${report.status === 'approved' ? ' selected' : ''}>Aprobado</option></select></td>
+  const batches = groupPersonnelReports(personnelReports);
+  body.innerHTML = batches.length
+    ? batches.map((batch) => `<tr>
+      <td>${new Date(batch.createdAt).toLocaleDateString('es-MX', { dateStyle: 'medium' })}<br><small>Enviado: ${new Date(batch.createdAt).toLocaleString('es-MX', { timeStyle: 'short' })}</small></td>
+      <td><strong>${number(batch.reports.length)} movimiento${batch.reports.length === 1 ? '' : 's'}</strong><br><small>Reporte semanal acumulado</small></td>
+      <td><details class="personnel-batch-details"><summary>Ver lista de choferes</summary><ul>${batch.reports.map((report) => `<li><strong>${esc(report.driverName)}</strong>${report.unitNumber ? ` · Unidad ${esc(report.unitNumber)}` : ''}<br><small>${esc(personnelMovementLabel(report.movementType))} · ${esc(report.reason)}</small></li>`).join('')}</ul></details></td>
+      <td>${esc(batch.reportedByEmail || 'Personal autorizado')}</td>
+      <td>${personnelStatusBadge(batch.status)}<br><select class="personnel-status-select" data-personnel-batch-id="${esc(batch.id)}" aria-label="Actualizar estado del reporte semanal"><option value="pending"${batch.status === 'pending' ? ' selected' : ''}>Pendiente</option><option value="reviewed"${batch.status === 'reviewed' ? ' selected' : ''}>Revisado</option><option value="approved"${batch.status === 'approved' ? ' selected' : ''}>Aprobar reporte</option></select></td>
     </tr>`).join('')
-    : '<tr class="empty"><td colspan="6">No hay movimientos que coincidan con los filtros.</td></tr>';
+    : '<tr class="empty"><td colspan="5">No hay reportes semanales que coincidan con los filtros.</td></tr>';
 }
 async function loadPersonnelReports() {
   const params = new URLSearchParams();
@@ -609,17 +625,16 @@ $('#personnel-clear-filters').addEventListener('click', () => {
   void loadPersonnelReports().catch((error) => showToast(error.message || 'No fue posible actualizar los movimientos.'));
 });
 $('#personnel-control-body').addEventListener('change', async (event) => {
-  const select = event.target.closest('[data-personnel-status-id]');
+  const select = event.target.closest('[data-personnel-batch-id]');
   if (!select) return;
   select.disabled = true;
   try {
-    const response = await fetch(`/api/personnel-control/${encodeURIComponent(select.dataset.personnelStatusId)}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: select.value }) });
+    const response = await fetch(`/api/personnel-control/batches/${encodeURIComponent(select.dataset.personnelBatchId)}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: select.value }) });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'No fue posible actualizar el estado.');
-    const report = personnelReports.find((item) => item.id === data.id);
-    if (report) report.status = data.status;
+    if (!response.ok) throw new Error(data.error || 'No fue posible actualizar el reporte semanal.');
+    personnelReports.forEach((report) => { if ((report.batchId || report.id) === data.batchId) report.status = data.status; });
     renderPersonnelControl();
-    showToast(`Reporte marcado como ${personnelStatusLabel(data.status).toLowerCase()}.`);
+    showToast(`Reporte semanal marcado como ${personnelStatusLabel(data.status).toLowerCase()}.`);
   } catch (requestError) {
     showToast(requestError.message || 'No fue posible actualizar el estado.');
     await loadPersonnelReports().catch(() => {});

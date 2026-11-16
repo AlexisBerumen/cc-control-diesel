@@ -236,6 +236,9 @@ th { background: #eef2ff; color: #324a91; }
 .personnel-filters .filter-link { align-self: center; margin-top: 20px; }
 .personnel-control-table { min-width: 970px; }
 .personnel-control-table small { color: var(--muted); }
+.personnel-batch-details summary { color: #1b3584; font-size: 13px; font-weight: 800; cursor: pointer; }
+.personnel-batch-details ul { margin: 9px 0 0; padding-left: 18px; }
+.personnel-batch-details li { margin: 0 0 8px; color: var(--ink); font-size: 12px; line-height: 1.35; }
 .personnel-status-select { min-width: 120px; padding: 7px 8px; border: 1px solid #cbd4e7; border-radius: 7px; background: #fff; color: var(--ink); font: inherit; font-size: 12px; }
 
 @media (max-width: 820px) {
