@@ -23,6 +23,7 @@
         <a class="active" href="#registro">Registrar carga</a>
         <a id="records-link" href="#registros" hidden>Registros</a>
         <a id="reconciliation-link" href="#conciliacion" hidden>Conciliación</a>
+        <a id="fuel-inventory-link" href="#inventario-diesel" hidden>Inventario diésel</a>
         <a id="driver-assignment-link" href="#asignar-chofer" hidden>Asignar chofer</a>
         <a id="units-link" href="#unidades" hidden>Unidades</a>
         <button id="login-button" class="nav-button" type="button">Iniciar sesión</button>
@@ -79,14 +80,26 @@
               <p id="gallons-error" class="error" role="alert"></p>
             </div>
             <div>
-              <label for="amount">Importe total (MXN, opcional)</label>
-              <input id="amount" name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Ej. 6020.75" />
-              <p class="field-help">Déjalo vacío si la carga fue en la bomba de la empresa.</p>
-              <p id="amount-error" class="error" role="alert"></p>
+              <label for="fuel-source">¿Dónde cargaste?</label>
+              <select id="fuel-source" name="fuelSource" required>
+                <option value="">Selecciona una opción</option>
+                <option value="hobbs">Bomba C&C — Hobbs</option>
+                <option value="orla">Bomba C&C — Orla</option>
+                <option value="pilot">Pilot</option>
+              </select>
+              <p id="fuel-source-note" class="field-help">Selecciona la bomba o gasolinera donde cargaste.</p>
+              <p id="fuel-source-error" class="error" role="alert"></p>
             </div>
             <div>
-              <label for="station">Estación de servicio</label>
-              <input id="station" name="station" type="text" maxlength="80" placeholder="Ej. Hobbs u Orla" required />
+              <label for="amount">Importe total (MXN, opcional)</label>
+              <input id="amount" name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Ej. 6020.75" />
+              <p id="amount-help" class="field-help">Déjalo vacío si la carga fue en la bomba de la empresa.</p>
+              <p id="amount-error" class="error" role="alert"></p>
+            </div>
+            <div id="pilot-location-field" hidden>
+              <label for="station">Ubicación de Pilot</label>
+              <input id="station" name="station" type="text" maxlength="80" placeholder="Ej. Pilot Travel Center, Odessa" />
+              <p class="field-help">Indica la ciudad o la ubicación donde cargaste.</p>
               <p id="station-error" class="error" role="alert"></p>
             </div>
           </div>
@@ -123,6 +136,7 @@
             <div><dt>Unidad</dt><dd>—</dd></div>
             <div><dt>Odómetro</dt><dd>—</dd></div>
             <div><dt>Galones</dt><dd>—</dd></div>
+            <div><dt>Origen</dt><dd>—</dd></div>
             <div><dt>Importe</dt><dd>—</dd></div>
             <div><dt>Precio por litro</dt><dd>—</dd></div>
             <div><dt>Evidencias</dt><dd>—</dd></div>
@@ -145,6 +159,42 @@
           <button id="records-previous-page" class="secondary-button" type="button">← Anterior</button>
           <p id="records-page-summary" class="field-help" aria-live="polite"></p>
           <button id="records-next-page" class="secondary-button" type="button">Siguiente →</button>
+        </div>
+      </section>
+
+      <section id="inventario-diesel" class="card fuel-inventory-card" hidden>
+        <div class="records-heading">
+          <div>
+            <p class="eyebrow">Control de bombas</p>
+            <h2>Inventario de diésel</h2>
+            <p class="muted">Las existencias inician en cero para esta prueba piloto. Cada carga en Hobbs u Orla descuenta galones automáticamente.</p>
+          </div>
+        </div>
+        <div class="tank-balance-grid" aria-label="Existencia por bomba">
+          <div class="tank-balance"><span>Bomba C&C</span><strong>Hobbs</strong><b id="hobbs-tank-balance">0 gal</b></div>
+          <div class="tank-balance"><span>Bomba C&C</span><strong>Orla</strong><b id="orla-tank-balance">0 gal</b></div>
+        </div>
+        <div class="divider"></div>
+        <div class="records-heading purchase-heading">
+          <div><p class="eyebrow">Nueva compra</p><h3>Registrar recarga de bomba</h3><p class="muted">La factura y los galones son obligatorios.</p></div>
+        </div>
+        <form id="fuel-purchase-form" class="fuel-purchase-form" novalidate>
+          <label>Destino de la compra
+            <select id="purchase-tank-location" required><option value="">Selecciona bomba</option><option value="Hobbs">Hobbs</option><option value="Orla">Orla</option></select>
+          </label>
+          <label>Galones comprados
+            <input id="purchase-gallons" type="number" min="0.01" max="100000" step="0.01" inputmode="decimal" placeholder="Ej. 7,500" required />
+          </label>
+          <label class="upload-box compact-upload" id="purchase-invoice-box" for="purchase-invoice-photo">
+            <input id="purchase-invoice-photo" type="file" accept="image/*" capture="environment" required />
+            <span class="upload-icon">▣</span><strong>Subir factura de compra</strong><small>JPG, PNG o HEIC</small><span class="file-name">Tomar o seleccionar foto</span>
+          </label>
+          <button id="save-fuel-purchase" class="primary-button" type="submit">Guardar compra</button>
+        </form>
+        <p id="fuel-purchase-error" class="error" role="alert"></p>
+        <div class="driver-assignment-log">
+          <div class="records-heading"><div><p class="eyebrow">Historial</p><h3>Compras recientes</h3></div></div>
+          <div class="table-wrap"><table class="fuel-purchase-table"><thead><tr><th>Fecha</th><th>Bomba</th><th>Galones</th><th>Factura</th><th>Registró</th></tr></thead><tbody id="fuel-purchases-body"><tr class="empty"><td colspan="5">Aún no hay compras registradas.</td></tr></tbody></table></div>
         </div>
       </section>
 

@@ -98,6 +98,31 @@ async function initializeDatabase() {
       id TEXT PRIMARY KEY, motive_driver_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, email TEXT,
       active BOOLEAN NOT NULL DEFAULT TRUE, motive_updated_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS fuel_tanks (
+      location TEXT PRIMARY KEY CHECK (location IN ('Hobbs', 'Orla')),
+      balance_gallons NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (balance_gallons >= 0),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS fuel_purchases (
+      purchase_id BIGSERIAL PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      tank_location TEXT NOT NULL REFERENCES fuel_tanks(location),
+      gallons NUMERIC(12,2) NOT NULL CHECK (gallons > 0),
+      invoice_file TEXT NOT NULL,
+      invoice_url TEXT NOT NULL,
+      recorded_by_role TEXT,
+      recorded_by_email TEXT
+    );
+    CREATE TABLE IF NOT EXISTS fuel_inventory_movements (
+      movement_id BIGSERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      tank_location TEXT NOT NULL REFERENCES fuel_tanks(location),
+      movement_type TEXT NOT NULL CHECK (movement_type IN ('purchase', 'fuel_load')),
+      gallons NUMERIC(12,2) NOT NULL CHECK (gallons <> 0),
+      balance_after NUMERIC(12,2) NOT NULL CHECK (balance_after >= 0),
+      reference_id TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS driver_assignment_log (
       log_id BIGSERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -148,12 +173,17 @@ async function initializeDatabase() {
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_warning BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_reference INTEGER;
     ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS odometer_difference INTEGER;
+    ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS fuel_source TEXT;
+    ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_fuel_source_check;
+    ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_fuel_source_check CHECK (fuel_source IS NULL OR fuel_source IN ('hobbs', 'orla', 'pilot'));
     UPDATE fuel_records SET driver_name = 'No registrado' WHERE driver_name IS NULL;
     ALTER TABLE fuel_records ALTER COLUMN driver_name SET NOT NULL;
     ALTER TABLE fuel_records DROP CONSTRAINT IF EXISTS fuel_records_gallons_check;
     ALTER TABLE fuel_records ADD CONSTRAINT fuel_records_gallons_check CHECK (gallons > 0 AND gallons <= 300);
     CREATE INDEX IF NOT EXISTS fuel_records_created_at_idx ON fuel_records (created_at DESC, record_id DESC);
     CREATE INDEX IF NOT EXISTS fuel_records_unit_odometer_idx ON fuel_records (unit_id, odometer DESC);
+    CREATE INDEX IF NOT EXISTS fuel_purchases_created_at_idx ON fuel_purchases (created_at DESC, purchase_id DESC);
+    CREATE INDEX IF NOT EXISTS fuel_inventory_movements_tank_created_at_idx ON fuel_inventory_movements (tank_location, created_at DESC, movement_id DESC);
     CREATE INDEX IF NOT EXISTS motive_odometer_readings_unit_observed_at_idx ON motive_odometer_readings (unit_id, observed_at DESC);
     CREATE INDEX IF NOT EXISTS driver_assignment_log_created_at_idx ON driver_assignment_log (created_at DESC, log_id DESC);
     CREATE TABLE IF NOT EXISTS motive_connection (
@@ -171,6 +201,7 @@ async function initializeDatabase() {
     ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS email TEXT;
     ALTER TABLE driver_assignment_log ADD COLUMN IF NOT EXISTS actor_email TEXT;`);
   for (const unit of loadSeedUnits()) await pool.query('INSERT INTO units (id, number, identifier, description) VALUES ($1, $2, $3, $4) ON CONFLICT (number) DO NOTHING', [unit.id, unit.number, unit.identifier, unit.description]);
+  await pool.query("INSERT INTO fuel_tanks (location, balance_gallons) VALUES ('Hobbs', 0), ('Orla', 0) ON CONFLICT (location) DO NOTHING");
   await pool.query(`INSERT INTO motive_odometer_readings (unit_id, odometer, odometer_unit, observed_at)
     SELECT id, motive_odometer, COALESCE(motive_odometer_unit, 'mi'), COALESCE(motive_odometer_updated_at, NOW())
     FROM units WHERE motive_odometer IS NOT NULL AND motive_odometer > 0
@@ -238,7 +269,7 @@ function cloudinaryConfigured() { return Boolean(process.env.CLOUDINARY_CLOUD_NA
 function isCloudinaryEvidenceUrl(value) { return typeof value === 'string' && value.startsWith(`https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`); }
 async function uploadEvidenceToCloudinary(dataUrl, kind) {
   if (!cloudinaryConfigured()) throw new Error('Falta configurar Cloudinary en Railway.');
-  if (!['ticket', 'odometer'].includes(kind) || typeof dataUrl !== 'string' || !/^data:image\/(jpeg|jpg|png|heic|webp);base64,/i.test(dataUrl)) throw new Error('La evidencia debe ser una imagen válida.');
+  if (!['ticket', 'odometer', 'purchase-invoice'].includes(kind) || typeof dataUrl !== 'string' || !/^data:image\/(jpeg|jpg|png|heic|webp);base64,/i.test(dataUrl)) throw new Error('La evidencia debe ser una imagen válida.');
   const encoded = dataUrl.slice(dataUrl.indexOf(',') + 1);
   if (Buffer.byteLength(encoded, 'base64') > 8 * 1024 * 1024) throw new Error('Cada foto debe pesar máximo 8 MB.');
   const form = new URLSearchParams({ file: dataUrl, folder: 'cc-control-diesel/evidencias', public_id: `${kind}-${crypto.randomUUID()}`, tags: 'cc-control-diesel,evidencia' });
@@ -547,6 +578,36 @@ async function handleApi(request, response, url) {
     sendExcel(response, `inventario-gps-motive-${new Date().toISOString().slice(0, 10)}.xlsx`, 'Inventario GPS', [['Número de unidad', 'Número de serie de GPS'], ...rows]);
     return true;
   }
+  if (url.pathname === '/api/fuel-inventory' && request.method === 'GET') {
+    const tanks = await pool.query('SELECT location, balance_gallons AS "balanceGallons", updated_at AS "updatedAt" FROM fuel_tanks ORDER BY location');
+    sendJson(response, 200, { tanks: tanks.rows }); return true;
+  }
+  if (url.pathname === '/api/fuel-purchases' && request.method === 'GET') {
+    if (!await requireStaff(request, response)) return true;
+    const purchases = await pool.query(`SELECT id, created_at AS "createdAt", tank_location AS "tankLocation", gallons, invoice_file AS "invoiceFile", invoice_url AS "invoiceUrl", recorded_by_email AS "recordedByEmail"
+      FROM fuel_purchases ORDER BY created_at DESC, purchase_id DESC LIMIT 30`);
+    sendJson(response, 200, purchases.rows); return true;
+  }
+  if (url.pathname === '/api/fuel-purchases' && request.method === 'POST') {
+    const session = await requireStaff(request, response);
+    if (!session) return true;
+    const body = await readJson(request);
+    const location = cleanText(body.tankLocation, 20), gallons = Number(body.gallons), invoiceFile = cleanText(body.invoiceFile, 180), invoiceUrl = cleanText(body.invoiceUrl, 1_000);
+    if (!['Hobbs', 'Orla'].includes(location) || !Number.isFinite(gallons) || gallons <= 0 || gallons > 100_000 || !invoiceFile || !isCloudinaryEvidenceUrl(invoiceUrl)) { sendJson(response, 400, { error: 'Completa la bomba, los galones y la factura válida de la compra.' }); return true; }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const updatedTank = await client.query('UPDATE fuel_tanks SET balance_gallons = balance_gallons + $1, updated_at = NOW() WHERE location = $2 RETURNING balance_gallons AS "balanceGallons"', [gallons, location]);
+      if (!updatedTank.rowCount) throw new Error('No se encontró la bomba seleccionada.');
+      const inserted = await client.query(`INSERT INTO fuel_purchases (id, tank_location, gallons, invoice_file, invoice_url, recorded_by_role, recorded_by_email)
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at AS "createdAt", tank_location AS "tankLocation", gallons, invoice_file AS "invoiceFile", invoice_url AS "invoiceUrl"`, [crypto.randomUUID(), location, gallons, invoiceFile, invoiceUrl, session.role || 'staff', session.email || null]);
+      await client.query('INSERT INTO fuel_inventory_movements (tank_location, movement_type, gallons, balance_after, reference_id) VALUES ($1, $2, $3, $4, $5)', [location, 'purchase', gallons, updatedTank.rows[0].balanceGallons, inserted.rows[0].id]);
+      await client.query('COMMIT');
+      sendJson(response, 201, { purchase: inserted.rows[0], balanceGallons: updatedTank.rows[0].balanceGallons });
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+    return true;
+  }
   if (url.pathname === '/api/units' && request.method === 'GET') {
     const result = await pool.query('SELECT id, number, identifier AS plates, description, motive_odometer AS "motiveOdometer", motive_odometer_unit AS "motiveOdometerUnit", motive_odometer_updated_at AS "motiveOdometerUpdatedAt" FROM units ORDER BY number');
     sendJson(response, 200, result.rows); return true;
@@ -619,7 +680,7 @@ async function handleApi(request, response, url) {
     const requestedLimit = Number.parseInt(url.searchParams.get('limit') || String(recordsPageSize), 10);
     const limit = exportAll ? maxRecordsExport : Math.min(maxRecordsPageSize, Math.max(1, Number.isSafeInteger(requestedLimit) ? requestedLimit : recordsPageSize));
     const requestedSafePage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-    const columns = 'id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", odometer_warning AS "odometerWarning", odometer_reference AS "odometerReference", odometer_difference AS "odometerDifference"';
+    const columns = 'id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, fuel_source AS "fuelSource", ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", odometer_warning AS "odometerWarning", odometer_reference AS "odometerReference", odometer_difference AS "odometerDifference"';
     const motiveColumns = session.role === 'admin' ? ', motive_assignment_status AS "motiveAssignmentStatus", motive_assignment_message AS "motiveAssignmentMessage", motive_assignment_updated_at AS "motiveAssignmentUpdatedAt"' : '';
     const countResult = await pool.query(`SELECT COUNT(*)::integer AS total FROM fuel_records ${filter.where}`, filter.values);
     const total = countResult.rows[0].total;
@@ -696,8 +757,10 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/records' && request.method === 'POST') {
     const body = await readJson(request);
     const id = cleanText(body.id, 80) || crypto.randomUUID(), odometer = Number(body.odometer), gallons = Number(body.gallons), amount = body.amount === null || body.amount === '' || body.amount === undefined ? null : Number(body.amount);
-    const driverId = cleanText(body.driverId, 100), station = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180), ticketUrl = cleanText(body.ticketUrl, 1_000), odometerUrl = cleanText(body.odometerUrl, 1_000);
-    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || !driverId || !station || !ticketFile || !odometerFile || !isCloudinaryEvidenceUrl(ticketUrl) || !isCloudinaryEvidenceUrl(odometerUrl)) { sendJson(response, 400, { error: `Datos de carga incompletos o no válidos. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
+    const driverId = cleanText(body.driverId, 100), fuelSource = cleanText(body.fuelSource, 20).toLowerCase(), pilotLocation = cleanText(body.station, 120), ticketFile = cleanText(body.ticketFile, 180), odometerFile = cleanText(body.odometerFile, 180), ticketUrl = cleanText(body.ticketUrl, 1_000), odometerUrl = cleanText(body.odometerUrl, 1_000);
+    const tankLocation = fuelSource === 'hobbs' ? 'Hobbs' : fuelSource === 'orla' ? 'Orla' : null;
+    const station = fuelSource === 'pilot' ? pilotLocation : tankLocation;
+    if (!cleanText(body.unitId, 80) || !Number.isInteger(odometer) || odometer <= 0 || !Number.isFinite(gallons) || gallons <= 0 || gallons > maxGallonsPerLoad || !['hobbs', 'orla', 'pilot'].includes(fuelSource) || !station || (amount !== null && (!Number.isFinite(amount) || amount <= 0)) || (fuelSource === 'pilot' && amount === null) || !driverId || !ticketFile || !odometerFile || !isCloudinaryEvidenceUrl(ticketUrl) || !isCloudinaryEvidenceUrl(odometerUrl)) { sendJson(response, 400, { error: `Datos de carga incompletos o no válidos. Pilot requiere ubicación e importe. Máximo: ${maxGallonsPerLoad} galones.` }); return true; }
     const unitResult = await pool.query('SELECT id, number, identifier, motive_vehicle_id, motive_odometer FROM units WHERE id = $1', [body.unitId]);
     if (!unitResult.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada no existe.' }); return true; }
     const unit = unitResult.rows[0];
@@ -712,11 +775,24 @@ async function handleApi(request, response, url) {
     let savedRecord;
     try {
       await client.query('BEGIN');
-      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, ticket_file, odometer_file, ticket_url, odometer_url, motive_assignment_status, motive_assignment_message, odometer_warning, odometer_reference, odometer_difference) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, ticketFile, odometerFile, ticketUrl, odometerUrl, 'processing', 'Validando asignacion con Motive...', odometerWarning, odometerReference || null, odometerDifference || null]);
+      let balanceAfter = null;
+      if (tankLocation) {
+        const tank = await client.query('SELECT balance_gallons AS "balanceGallons" FROM fuel_tanks WHERE location = $1 FOR UPDATE', [tankLocation]);
+        const available = Number(tank.rows[0]?.balanceGallons || 0);
+        if (!tank.rowCount || available < gallons) {
+          const error = new Error(`${tankLocation} no tiene diésel suficiente. Disponible: ${available.toFixed(2)} galones.`);
+          error.code = 'INSUFFICIENT_TANK_FUEL';
+          throw error;
+        }
+        const deducted = await client.query('UPDATE fuel_tanks SET balance_gallons = balance_gallons - $1, updated_at = NOW() WHERE location = $2 RETURNING balance_gallons AS "balanceGallons"', [gallons, tankLocation]);
+        balanceAfter = deducted.rows[0].balanceGallons;
+      }
+      const inserted = await client.query('INSERT INTO fuel_records (id, folio, unit_id, unit_number, identifier, driver_id, driver_name, odometer, gallons, amount, station, fuel_source, ticket_file, odometer_file, ticket_url, odometer_url, motive_assignment_status, motive_assignment_message, odometer_warning, odometer_reference, odometer_difference) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING record_id, created_at', [id, `PENDING-${id}`, unit.id, unit.number, unit.identifier, driver.id, driver.name, odometer, gallons, amount, station, fuelSource, ticketFile, odometerFile, ticketUrl, odometerUrl, 'processing', 'Validando asignacion con Motive...', odometerWarning, odometerReference || null, odometerDifference || null]);
       const row = inserted.rows[0], folio = `DC-${new Date(row.created_at).getFullYear()}-${String(row.record_id).padStart(5, '0')}`;
-      const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", odometer_warning AS "odometerWarning", odometer_reference AS "odometerReference", odometer_difference AS "odometerDifference"', [folio, row.record_id]);
+      if (tankLocation) await client.query('INSERT INTO fuel_inventory_movements (tank_location, movement_type, gallons, balance_after, reference_id) VALUES ($1, $2, $3, $4, $5)', [tankLocation, 'fuel_load', -gallons, balanceAfter, id]);
+      const saved = await client.query('UPDATE fuel_records SET folio = $1 WHERE record_id = $2 RETURNING id, folio, created_at AS "createdAt", unit_id AS "unitId", unit_number AS "unitNumber", identifier AS plates, driver_name AS "driverName", odometer, gallons, amount, station, fuel_source AS "fuelSource", ticket_file AS "ticketFile", odometer_file AS "odometerFile", ticket_url AS "ticketUrl", odometer_url AS "odometerUrl", odometer_warning AS "odometerWarning", odometer_reference AS "odometerReference", odometer_difference AS "odometerDifference"', [folio, row.record_id]);
       await client.query('COMMIT'); savedRecord = saved.rows[0];
-    } catch (error) { await client.query('ROLLBACK'); if (error.code === '23505') sendJson(response, 409, { error: 'Esta carga ya fue registrada.' }); else throw error; }
+    } catch (error) { await client.query('ROLLBACK'); if (error.code === '23505') sendJson(response, 409, { error: 'Esta carga ya fue registrada.' }); else if (error.code === 'INSUFFICIENT_TANK_FUEL') sendJson(response, 422, { error: error.message }); else throw error; }
     finally { client.release(); }
     if (!savedRecord) return true;
     const assignment = await synchronizeMotivePermanentDriver(unit, driver);

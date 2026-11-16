@@ -25,6 +25,8 @@ let recordsPagination = { page: 1, limit: 20, total: 0, totalPages: 1 };
 let reconciliationData = null;
 let reconciliationPage = 1;
 let driverAssignmentLog = [];
+let fuelInventory = [];
+let fuelPurchases = [];
 let unitCatalogPage = 1;
 const maxOdometerJump = 10_000;
 const odometerWarningJump = 2_000;
@@ -36,6 +38,8 @@ function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)
 function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function money(value) { return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(value || 0)); }
 function number(value) { return new Intl.NumberFormat('es-MX', { maximumFractionDigits: 2 }).format(Number(value || 0)); }
+function fuelSourceLabel(source) { return source === 'hobbs' ? 'Bomba C&C — Hobbs' : source === 'orla' ? 'Bomba C&C — Orla' : source === 'pilot' ? 'Pilot' : 'No indicado'; }
+function tankBalance(location) { return Number(fuelInventory.find((tank) => tank.location === location)?.balanceGallons || 0); }
 function odometerValue() { return Number($('#odometer').value.replace(/[^0-9]/g, '')); }
 function formatOdometerInput() {
   const input = $('#odometer');
@@ -49,6 +53,31 @@ async function uploadEvidence(file, kind) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'No fue posible subir una evidencia.');
   return data;
+}
+function renderFuelInventory() {
+  $('#hobbs-tank-balance').textContent = `${number(tankBalance('Hobbs'))} gal`;
+  $('#orla-tank-balance').textContent = `${number(tankBalance('Orla'))} gal`;
+  updateFuelSourceFields();
+}
+function renderFuelPurchases() {
+  const body = $('#fuel-purchases-body');
+  body.innerHTML = fuelPurchases.length
+    ? fuelPurchases.map((purchase) => `<tr><td>${new Date(purchase.createdAt).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</td><td><strong>${esc(purchase.tankLocation)}</strong></td><td>${number(purchase.gallons)} gal</td><td><a class="evidence-link" href="${esc(purchase.invoiceUrl)}" target="_blank" rel="noopener">Factura (clic aquí)</a></td><td>${esc(purchase.recordedByEmail || 'Sesión autorizada')}</td></tr>`).join('')
+    : '<tr class="empty"><td colspan="5">Aún no hay compras registradas.</td></tr>';
+}
+async function loadFuelInventory() {
+  const response = await fetch('/api/fuel-inventory');
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No fue posible consultar el inventario de diésel.');
+  fuelInventory = data.tanks || [];
+  renderFuelInventory();
+}
+async function loadFuelPurchases() {
+  const response = await fetch('/api/fuel-purchases');
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No fue posible consultar las compras de diésel.');
+  fuelPurchases = data;
+  renderFuelPurchases();
 }
 
 function lastOdometer(unitId) {
@@ -128,7 +157,7 @@ function updateRecordsPagination() {
 function renderRecords() {
   const body = $('#records-body');
   if (!records.length) body.innerHTML = '<tr class="empty"><td colspan="8">Aún no hay cargas registradas.</td></tr>';
-  else body.innerHTML = records.map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(recordUnitDescription(r))}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
+  else body.innerHTML = records.map(r => `<tr><td>${esc(r.folio)}</td><td>${new Date(r.createdAt).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</td><td><strong>${esc(r.unitNumber)}</strong><br><small>${esc(r.driverName || 'No registrado')} · ${esc(recordUnitDescription(r))}<br>${esc(fuelSourceLabel(r.fuelSource))}${r.fuelSource === 'pilot' ? ` · ${esc(r.station)}` : ''}</small></td><td>${number(r.odometer)} mi</td><td>${number(r.gallons)} gal</td><td>${r.amount === null || r.amount === undefined ? 'Bomba C&C' : money(r.amount)}</td><td>${r.ticketUrl && r.odometerUrl ? `<a class="evidence-link" href="${esc(r.ticketUrl)}" target="_blank" rel="noopener">Ticket</a><a class="evidence-link" href="${esc(r.odometerUrl)}" target="_blank" rel="noopener">Odómetro</a>` : 'No disponible'}</td><td><span class="status">Completo</span></td></tr>`).join('');
   const renderedRows = [...$('#records-body').querySelectorAll('tr')];
   renderedRows.forEach((row, index) => {
     const record = records[index];
@@ -468,6 +497,20 @@ function validateOdometer(show = true) {
   $('#odometer').classList.toggle('input-warning', Boolean(caution));
   return !message;
 }
+function updateFuelSourceFields() {
+  const source = $('#fuel-source').value;
+  const pilot = source === 'pilot';
+  const localTank = source === 'hobbs' ? 'Hobbs' : source === 'orla' ? 'Orla' : '';
+  $('#pilot-location-field').hidden = !pilot;
+  $('#station').required = pilot;
+  $('#amount').required = pilot;
+  $('#amount').previousElementSibling.textContent = pilot ? 'Importe total (MXN, obligatorio)' : 'Importe total (MXN, opcional)';
+  $('#amount-help').textContent = pilot ? 'En Pilot debes registrar el importe total del ticket.' : 'Déjalo vacío si la carga fue en la bomba de la empresa.';
+  if (!pilot) { $('#station').value = ''; setError('#station-error', ''); }
+  if (localTank) $('#fuel-source-note').textContent = `Disponible en ${localTank}: ${number(tankBalance(localTank))} galones.`;
+  else if (pilot) $('#fuel-source-note').textContent = 'Indica la ubicación de Pilot y el importe total del ticket.';
+  else $('#fuel-source-note').textContent = 'Selecciona la bomba o gasolinera donde cargaste.';
+}
 function validate(show = true) {
   let valid = true;
   const typed = $('#unit-search').value.trim();
@@ -481,9 +524,14 @@ function validate(show = true) {
   if (!gallons || gallons <= 0) { if (show) setError('#gallons-error', 'Indica galones mayores a cero.'); valid = false; }
   else if (gallons > 300) { if (show) setError('#gallons-error', 'Máximo permitido: 300 galones por carga.'); valid = false; }
   else setError('#gallons-error', '');
+  const fuelSource = $('#fuel-source').value;
+  if (!['hobbs', 'orla', 'pilot'].includes(fuelSource)) { if (show) setError('#fuel-source-error', 'Selecciona dónde realizaste la carga.'); valid = false; }
+  else { setError('#fuel-source-error', ''); }
+  const selectedTank = fuelSource === 'hobbs' ? 'Hobbs' : fuelSource === 'orla' ? 'Orla' : null;
+  if (selectedTank && gallons > tankBalance(selectedTank)) { if (show) setError('#gallons-error', `${selectedTank} tiene disponibles ${number(tankBalance(selectedTank))} galones. Registra una compra o verifica la cantidad.`); valid = false; }
   const amountValue = $('#amount').value.trim(), amount = Number(amountValue);
-  if (amountValue && (!amount || amount <= 0)) { if (show) setError('#amount-error', 'El importe debe ser mayor a cero o déjalo vacío para bomba C&C.'); valid = false; } else setError('#amount-error', '');
-  if (!$('#station').value.trim()) { if (show) setError('#station-error', 'Indica la estación de servicio.'); valid = false; } else setError('#station-error', '');
+  if ((!amountValue && fuelSource === 'pilot') || (amountValue && (!amount || amount <= 0))) { if (show) setError('#amount-error', fuelSource === 'pilot' ? 'En Pilot el importe total es obligatorio y debe ser mayor a cero.' : 'El importe debe ser mayor a cero o déjalo vacío para bomba C&C.'); valid = false; } else setError('#amount-error', '');
+  if (fuelSource === 'pilot' && !$('#station').value.trim()) { if (show) setError('#station-error', 'Indica la ubicación de Pilot donde cargaste.'); valid = false; } else setError('#station-error', '');
   const evidenceFiles = [$('#ticket-photo').files[0], $('#odometer-photo').files[0]];
   if (evidenceFiles.some(file => !file)) { if (show) setError('#evidence-error', 'Debes adjuntar las dos evidencias.'); valid = false; }
   else if (evidenceFiles.some(file => file.size > 8 * 1024 * 1024)) { if (show) setError('#evidence-error', 'Cada foto debe pesar máximo 8 MB.'); valid = false; }
@@ -491,11 +539,11 @@ function validate(show = true) {
   return valid;
 }
 function updateReview() {
-  const gallons = Number($('#gallons').value), amountValue = $('#amount').value.trim(), amount = amountValue ? Number(amountValue) : null, odo = odometerValue(), driverName = selectedDriver?.name || '';
+  const gallons = Number($('#gallons').value), amountValue = $('#amount').value.trim(), amount = amountValue ? Number(amountValue) : null, odo = odometerValue(), driverName = selectedDriver?.name || '', fuelSource = $('#fuel-source').value;
   const data = [
     ['Unidad', selectedUnit ? `${selectedUnit.number} · ${unitDescription(selectedUnit)}` : '—'], ['Chofer', driverName || '—'],
     ['Odómetro', odo ? `${number(odo)} mi${odometerCaution() ? ' ⚠' : ''}` : '—'], ['Galones', gallons ? `${number(gallons)} gal` : '—'],
-    ['Importe', amount ? money(amount) : 'Bomba C&C / no aplica'], ['Precio por galón', gallons && amount ? money(amount / gallons) : 'No aplica'],
+    ['Origen', fuelSource ? `${fuelSourceLabel(fuelSource)}${fuelSource === 'pilot' && $('#station').value.trim() ? ` · ${$('#station').value.trim()}` : ''}` : '—'], ['Importe', amount ? money(amount) : 'Bomba C&C / no aplica'], ['Precio por galón', gallons && amount ? money(amount / gallons) : 'No aplica'],
     ['Evidencias', $('#ticket-photo').files.length && $('#odometer-photo').files.length ? '2 de 2 adjuntas ✓' : `${$('#ticket-photo').files.length + $('#odometer-photo').files.length} de 2 adjuntas`]
   ];
   $('#review-list').innerHTML = data.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join('');
@@ -510,8 +558,8 @@ function resetFuelForm() {
   $('#odometer').classList.remove('input-invalid', 'input-warning');
   $('#dialog-odometer-warning').hidden = true;
   $('#odometer-warning-confirm').checked = false;
-  document.querySelectorAll('.upload-box').forEach(el => { el.classList.remove('has-file'); el.querySelector('.file-name').textContent = 'Toca aquí para tomar la foto'; });
-  document.querySelectorAll('.error').forEach(el => el.textContent = ''); updateReview();
+  document.querySelectorAll('.form-card .upload-box').forEach(el => { el.classList.remove('has-file'); el.querySelector('.file-name').textContent = 'Toca aquí para tomar la foto'; });
+  document.querySelectorAll('.error').forEach(el => el.textContent = ''); updateFuelSourceFields(); updateReview();
 }
 
 $('#unit-search').addEventListener('input', () => {
@@ -524,9 +572,41 @@ $('#driver-search').addEventListener('input', () => {
 $('#driver-options').addEventListener('click', e => { const button = e.target.closest('[data-driver-id]'); if (button) setDriver(drivers.find(driver => driver.id === button.dataset.driverId)); });
 document.addEventListener('click', e => { if (!e.target.closest('.autocomplete')) { $('#unit-options').hidden = true; $('#driver-options').hidden = true; } });
 ['gallons','amount','station','ticket-photo','odometer-photo'].forEach(id => $(`#${id}`).addEventListener('input', updateReview));
+$('#fuel-source').addEventListener('change', () => { updateFuelSourceFields(); updateReview(); });
 $('#odometer').addEventListener('input', () => { formatOdometerInput(); validateOdometer(Boolean(selectedUnit)); updateReview(); });
 const evidenceBoxes = { 'ticket-photo': '#ticket-box', 'odometer-photo': '#odometer-box' };
 Object.entries(evidenceBoxes).forEach(([inputId, boxSelector]) => $(`#${inputId}`).addEventListener('change', e => { const box = $(boxSelector); const name = e.target.files[0]?.name; box.classList.toggle('has-file', Boolean(name)); box.querySelector('.file-name').textContent = name || 'Tomar o seleccionar foto'; updateReview(); }));
+$('#purchase-invoice-photo').addEventListener('change', (event) => {
+  const file = event.target.files[0];
+  const box = $('#purchase-invoice-box');
+  box.classList.toggle('has-file', Boolean(file));
+  box.querySelector('.file-name').textContent = file?.name || 'Tomar o seleccionar foto';
+});
+$('#fuel-purchase-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const location = $('#purchase-tank-location').value;
+  const gallons = Number($('#purchase-gallons').value);
+  const invoice = $('#purchase-invoice-photo').files[0];
+  const error = $('#fuel-purchase-error');
+  error.textContent = '';
+  if (!['Hobbs', 'Orla'].includes(location) || !Number.isFinite(gallons) || gallons <= 0 || !invoice) { error.textContent = 'Selecciona la bomba, indica los galones y adjunta la factura de compra.'; return; }
+  if (invoice.size > 8 * 1024 * 1024) { error.textContent = 'La factura debe pesar máximo 8 MB.'; return; }
+  const button = $('#save-fuel-purchase');
+  button.disabled = true;
+  try {
+    showToast('Subiendo factura y registrando compra...');
+    const invoiceEvidence = await uploadEvidence(invoice, 'purchase-invoice');
+    const response = await fetch('/api/fuel-purchases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tankLocation: location, gallons, invoiceFile: invoice.name, invoiceUrl: invoiceEvidence.url }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No fue posible registrar la compra de diésel.');
+    event.currentTarget.reset();
+    $('#purchase-invoice-box').classList.remove('has-file');
+    $('#purchase-invoice-box .file-name').textContent = 'Tomar o seleccionar foto';
+    await Promise.all([loadFuelInventory(), loadFuelPurchases()]);
+    showToast(`Compra registrada. ${location} tiene ${number(data.balanceGallons)} galones disponibles.`);
+  } catch (purchaseError) { error.textContent = purchaseError.message || 'No fue posible registrar la compra de diésel.'; }
+  finally { button.disabled = false; }
+});
 
 $('#odometer-warning-confirm').addEventListener('change', () => {
   $('#confirm-button').disabled = !$('#odometer-warning-confirm').checked;
@@ -537,7 +617,9 @@ $('#fuel-form').addEventListener('submit', e => {
   e.preventDefault(); if (!validate()) { showToast('Revisa los campos marcados antes de continuar.'); return; }
   const amountValue = $('#amount').value.trim();
   const caution = odometerCaution();
-  const values = [['Unidad', `${selectedUnit.number} · ${unitDescription(selectedUnit)}`], ['Chofer', selectedDriver.name], ['Odómetro', `${number(odometerValue())} mi`], ['Galones', `${number($('#gallons').value)} gal`], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica'], ['Estación', $('#station').value.trim()]];
+  const fuelSource = $('#fuel-source').value;
+  const sourceDescription = fuelSource === 'pilot' ? `${fuelSourceLabel(fuelSource)} · ${$('#station').value.trim()}` : fuelSourceLabel(fuelSource);
+  const values = [['Unidad', `${selectedUnit.number} · ${unitDescription(selectedUnit)}`], ['Chofer', selectedDriver.name], ['Odómetro', `${number(odometerValue())} mi`], ['Galones', `${number($('#gallons').value)} gal`], ['Origen', sourceDescription], ['Importe', amountValue ? money(amountValue) : 'Bomba C&C / no aplica']];
   if (caution) values.splice(3, 0, ['Alerta', `Revisar: +${number(caution.difference)} mi vs. referencia`]);
   $('#dialog-summary').innerHTML = values.map(([k,v]) => `<p><span>${k}</span><strong>${esc(v)}</strong></p>`).join('');
   $('#dialog-odometer-warning').hidden = !caution;
@@ -560,7 +642,7 @@ $('#confirm-button').addEventListener('click', async e => {
       uploadEvidence($('#ticket-photo').files[0], 'ticket'),
       uploadEvidence($('#odometer-photo').files[0], 'odometer')
     ]);
-    const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, driverId: selectedDriver.id, driverName: selectedDriver.name, odometer: odometerValue(), gallons: Number($('#gallons').value), amount: amountValue ? Number(amountValue) : null, station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name, ticketUrl: ticketEvidence.url, odometerUrl: odometerEvidence.url };
+    const record = { id: crypto.randomUUID(), folio: `DC-${now.getFullYear()}-${String(records.length + 1).padStart(4,'0')}`, createdAt: now.toISOString(), unitId: selectedUnit.id, unitNumber: selectedUnit.number, plates: selectedUnit.plates, driverId: selectedDriver.id, driverName: selectedDriver.name, odometer: odometerValue(), gallons: Number($('#gallons').value), amount: amountValue ? Number(amountValue) : null, fuelSource: $('#fuel-source').value, station: $('#station').value.trim(), ticketFile: $('#ticket-photo').files[0].name, odometerFile: $('#odometer-photo').files[0].name, ticketUrl: ticketEvidence.url, odometerUrl: odometerEvidence.url };
     const response = await fetch('/api/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No fue posible guardar la carga.');
@@ -575,6 +657,7 @@ $('#confirm-button').addEventListener('click', async e => {
     try { await loadRecordsPage(1); }
     catch { /* La carga ya se guardó; el historial se actualizará al volver a abrirlo. */ }
   }
+  try { await loadFuelInventory(); } catch { /* La carga ya se guardó; el saldo se actualizará al recargar. */ }
   $('#confirm-dialog').close();
   resetFuelForm();
   $('#success-folio').textContent = `Folio de carga: ${saved.folio}`;
@@ -748,10 +831,12 @@ function setAdminInterface(authenticated, role = null) {
   $('#registros').hidden = !authenticated;
   $('#records-link').hidden = !authenticated;
   $('#conciliacion').hidden = !authenticated;
+  $('#inventario-diesel').hidden = !authenticated;
   $('#asignar-chofer').hidden = !authenticated;
   $('#unidades').hidden = !authenticated;
   $('#unit-form').hidden = role !== 'admin';
   $('#reconciliation-link').hidden = !authenticated;
+  $('#fuel-inventory-link').hidden = !authenticated;
   $('#driver-assignment-link').hidden = !authenticated;
   $('#units-link').hidden = !authenticated;
   $('#login-button').hidden = authenticated;
@@ -768,14 +853,16 @@ async function updateSession() {
 async function synchronizeWithDatabase() {
   try {
     const admin = await updateSession();
-    const [unitsResponse, driversResponse] = await Promise.all([fetch('/api/units'), fetch('/api/drivers')]);
+    const [unitsResponse, driversResponse, inventoryResponse] = await Promise.all([fetch('/api/units'), fetch('/api/drivers'), fetch('/api/fuel-inventory')]);
     if (unitsResponse.ok) { units = await unitsResponse.json(); save(STORAGE.units, units); }
     if (driversResponse.ok) { drivers = await driversResponse.json(); save(STORAGE.drivers, drivers); }
+    if (inventoryResponse.ok) { const inventory = await inventoryResponse.json(); fuelInventory = inventory.tanks || []; }
     renderReconciliationUnitOptions();
     renderDriverAssignmentOptions();
+    renderFuelInventory();
     if (admin) {
       if (!$('#reconciliation-date-from').value || !$('#reconciliation-date-to').value) setDefaultReconciliationRange();
-      await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog()]);
+      await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog(), loadFuelPurchases()]);
     } else {
       records = [];
       recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
@@ -785,6 +872,8 @@ async function synchronizeWithDatabase() {
       renderReconciliation();
       driverAssignmentLog = [];
       renderDriverAssignmentLog();
+      fuelPurchases = [];
+      renderFuelPurchases();
     }
     renderUnitCatalog(); updateReview();
   } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
@@ -825,6 +914,7 @@ $('#logout-button').addEventListener('click', async () => {
   recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
   reconciliationData = null;
   driverAssignmentLog = [];
+  fuelPurchases = [];
   localStorage.removeItem(STORAGE.records);
   setAdminInterface(false);
   renderRecords();
@@ -833,4 +923,4 @@ $('#logout-button').addEventListener('click', async () => {
   showToast('Sesión cerrada.');
 });
 
-setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); updateReview(); synchronizeWithDatabase();
+setAdminInterface(false); setDefaultReconciliationRange(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); renderFuelInventory(); renderFuelPurchases(); updateFuelSourceFields(); updateReview(); synchronizeWithDatabase();
