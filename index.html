@@ -375,10 +375,15 @@
           </label>
           <div class="personnel-actions">
             <a class="support-inline-link" href="https://wa.me/526183249678?text=Hola%2C%20necesito%20apoyo%20con%20un%20movimiento%20de%20personal%20o%20asignaci%C3%B3n%20que%20no%20aparece%20en%20Motive." target="_blank" rel="noopener">Contactar soporte por WhatsApp</a>
-            <button id="save-personnel-report" class="primary-button" type="submit">Guardar reporte semanal</button>
+            <button id="add-personnel-report-item" class="primary-button" type="submit">Agregar a la lista</button>
           </div>
         </form>
         <p id="personnel-control-error" class="error" role="alert"></p>
+
+        <div class="personnel-draft-list">
+          <div class="records-heading"><div><p class="eyebrow">Reporte en preparación</p><h3>Lista de choferes y movimientos</h3><p id="personnel-draft-summary" class="muted">Agrega los movimientos de tus choferes antes de guardar el reporte semanal.</p></div><button id="save-personnel-weekly-report" class="primary-button" type="button" disabled>Guardar reporte semanal</button></div>
+          <div class="table-wrap"><table class="personnel-draft-table"><thead><tr><th>Chofer</th><th>Unidad</th><th>Movimiento</th><th>Motivo</th><th></th></tr></thead><tbody id="personnel-draft-body"><tr class="empty"><td colspan="5">Aún no hay movimientos agregados a la lista.</td></tr></tbody></table></div>
+        </div>
 
         <div class="driver-assignment-log personnel-log">
           <div class="records-heading">

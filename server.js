@@ -152,6 +152,7 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS personnel_control_reports (
       report_id BIGSERIAL PRIMARY KEY,
       id TEXT NOT NULL UNIQUE,
+      batch_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       effective_date DATE NOT NULL,
       movement_type TEXT NOT NULL CHECK (movement_type IN ('onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'unreported_change', 'weekly_review')),
@@ -237,6 +238,8 @@ async function initializeDatabase() {
     ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin';
     ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS email TEXT;
     ALTER TABLE driver_assignment_log ADD COLUMN IF NOT EXISTS actor_email TEXT;`);
+  await pool.query('ALTER TABLE personnel_control_reports ADD COLUMN IF NOT EXISTS batch_id TEXT');
+  await pool.query('CREATE INDEX IF NOT EXISTS personnel_control_reports_batch_idx ON personnel_control_reports (batch_id, report_id)');
   for (const unit of loadSeedUnits()) await pool.query('INSERT INTO units (id, number, identifier, description) VALUES ($1, $2, $3, $4) ON CONFLICT (number) DO NOTHING', [unit.id, unit.number, unit.identifier, unit.description]);
   await pool.query("INSERT INTO fuel_tanks (location, balance_gallons) VALUES ('Hobbs', 0), ('Orla', 0) ON CONFLICT (location) DO NOTHING");
   await pool.query(`INSERT INTO motive_odometer_readings (unit_id, odometer, odometer_unit, observed_at)
@@ -754,7 +757,7 @@ async function handleApi(request, response, url) {
       if (!validMovementTypes.includes(movementType)) { sendJson(response, 400, { error: 'El tipo de movimiento no es válido.' }); return true; }
       values.push(movementType); conditions.push(`movement_type = $${values.length}`);
     }
-    const reports = await pool.query(`SELECT id, created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", assignment_type AS "assignmentType", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"
+    const reports = await pool.query(`SELECT id, batch_id AS "batchId", created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", assignment_type AS "assignmentType", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"
       FROM personnel_control_reports ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
       ORDER BY effective_date DESC, created_at DESC, report_id DESC LIMIT 200`, values);
     sendJson(response, 200, reports.rows); return true;
@@ -765,37 +768,50 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const validMovementTypes = ['onboarding', 'offboarding', 'temporary_assignment', 'permanent_assignment', 'unreported_change', 'weekly_review'];
     const validAssignmentTypes = ['temporary', 'permanent', 'not_applicable'];
-    const movementType = cleanText(body.movementType, 40);
-    const effectiveDate = cleanText(body.effectiveDate, 10);
-    const requestedDriverId = cleanText(body.driverId, 100);
-    const requestedUnitId = cleanText(body.unitId, 80);
-    const assignmentType = cleanText(body.assignmentType || 'not_applicable', 20);
-    const reason = cleanText(body.reason, 240);
-    const notes = cleanText(body.notes, 1_000) || null;
-    if (!validMovementTypes.includes(movementType) || !isIsoDate(effectiveDate) || !validAssignmentTypes.includes(assignmentType) || !reason) {
-      sendJson(response, 400, { error: 'Completa el tipo de movimiento, fecha efectiva, motivo y tipo de asignación.' }); return true;
-    }
-    let driverId = null;
-    let driverName = cleanText(body.driverName, 160);
-    if (requestedDriverId) {
-      const driver = await pool.query('SELECT id, name FROM drivers WHERE id = $1', [requestedDriverId]);
-      if (!driver.rowCount) { sendJson(response, 400, { error: 'El chofer seleccionado ya no está disponible.' }); return true; }
-      driverId = driver.rows[0].id;
-      driverName = driver.rows[0].name;
-    }
-    if (!driverName) { sendJson(response, 400, { error: 'Indica el nombre del chofer para registrar el movimiento.' }); return true; }
-    let unitId = null;
-    let unitNumber = cleanText(body.unitNumber, 40).toUpperCase() || null;
-    if (requestedUnitId) {
-      const unit = await pool.query('SELECT id, number FROM units WHERE id = $1', [requestedUnitId]);
-      if (!unit.rowCount) { sendJson(response, 400, { error: 'La unidad seleccionada ya no está disponible.' }); return true; }
-      unitId = unit.rows[0].id;
-      unitNumber = unit.rows[0].number;
-    }
-    const saved = await pool.query(`INSERT INTO personnel_control_reports (id, effective_date, movement_type, driver_id, driver_name, unit_id, unit_number, assignment_type, reason, notes, status, reported_by_role, reported_by_email, status_updated_by_email)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $12)
-      RETURNING id, created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", assignment_type AS "assignmentType", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"`, [crypto.randomUUID(), effectiveDate, movementType, driverId, driverName, unitId, unitNumber, assignmentType, reason, notes, session.role || 'staff', session.email || null]);
-    sendJson(response, 201, saved.rows[0]); return true;
+    const items = Array.isArray(body.items) ? body.items : [body];
+    if (!items.length || items.length > 100) { sendJson(response, 400, { error: 'Agrega entre 1 y 100 movimientos al reporte semanal.' }); return true; }
+    const batchId = crypto.randomUUID();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const saved = [];
+      for (const item of items) {
+        const movementType = cleanText(item.movementType, 40);
+        const effectiveDate = cleanText(item.effectiveDate, 10);
+        const requestedDriverId = cleanText(item.driverId, 100);
+        const requestedUnitId = cleanText(item.unitId, 80);
+        const assignmentType = cleanText(item.assignmentType || 'not_applicable', 20);
+        const reason = cleanText(item.reason, 240);
+        const notes = cleanText(item.notes, 1_000) || null;
+        if (!validMovementTypes.includes(movementType) || !isIsoDate(effectiveDate) || !validAssignmentTypes.includes(assignmentType) || !reason) throw new Error('Cada movimiento debe incluir tipo, fecha efectiva, motivo y tipo de asignación válidos.');
+        let driverId = null;
+        let driverName = cleanText(item.driverName, 160);
+        if (requestedDriverId) {
+          const driver = await client.query('SELECT id, name FROM drivers WHERE id = $1', [requestedDriverId]);
+          if (!driver.rowCount) throw new Error('Uno de los choferes seleccionados ya no está disponible. Actualiza la página e inténtalo de nuevo.');
+          driverId = driver.rows[0].id;
+          driverName = driver.rows[0].name;
+        }
+        if (!driverName) throw new Error('Cada movimiento debe indicar el nombre del chofer.');
+        let unitId = null;
+        let unitNumber = cleanText(item.unitNumber, 40).toUpperCase() || null;
+        if (requestedUnitId) {
+          const unit = await client.query('SELECT id, number FROM units WHERE id = $1', [requestedUnitId]);
+          if (!unit.rowCount) throw new Error('Una de las unidades seleccionadas ya no está disponible. Actualiza la página e inténtalo de nuevo.');
+          unitId = unit.rows[0].id;
+          unitNumber = unit.rows[0].number;
+        }
+        const inserted = await client.query(`INSERT INTO personnel_control_reports (id, batch_id, effective_date, movement_type, driver_id, driver_name, unit_id, unit_number, assignment_type, reason, notes, status, reported_by_role, reported_by_email, status_updated_by_email)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $13)
+          RETURNING id, created_at AS "createdAt", effective_date AS "effectiveDate", movement_type AS "movementType", driver_id AS "driverId", driver_name AS "driverName", unit_id AS "unitId", unit_number AS "unitNumber", assignment_type AS "assignmentType", reason, notes, status, reported_by_email AS "reportedByEmail", status_updated_at AS "statusUpdatedAt", status_updated_by_email AS "statusUpdatedByEmail"`, [crypto.randomUUID(), batchId, effectiveDate, movementType, driverId, driverName, unitId, unitNumber, assignmentType, reason, notes, session.role || 'staff', session.email || null]);
+        saved.push(inserted.rows[0]);
+      }
+      await client.query('COMMIT');
+      sendJson(response, 201, { batchId, savedCount: saved.length, reports: saved }); return true;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      sendJson(response, 400, { error: error.message || 'No fue posible guardar el reporte semanal.' }); return true;
+    } finally { client.release(); }
   }
   const personnelStatusMatch = url.pathname.match(/^\/api\/personnel-control\/([^/]+)\/status$/);
   if (personnelStatusMatch && request.method === 'PATCH') {

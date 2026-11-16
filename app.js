@@ -29,6 +29,7 @@ let fuelInventory = [];
 let fuelPurchases = [];
 let fuelInventoryMovements = [];
 let personnelReports = [];
+let personnelDraftItems = [];
 let personnelSelectedDriver = null;
 let personnelSelectedUnit = null;
 let unitCatalogPage = 1;
@@ -375,6 +376,19 @@ function resetPersonnelForm() {
   $('#personnel-driver-options').hidden = true;
   $('#personnel-unit-options').hidden = true;
 }
+function renderPersonnelDraft() {
+  const body = $('#personnel-draft-body');
+  const count = personnelDraftItems.length;
+  $('#personnel-draft-summary').textContent = count
+    ? `${count} movimiento${count === 1 ? '' : 's'} listo${count === 1 ? '' : 's'} para guardar en un solo reporte semanal.`
+    : 'Agrega los movimientos de tus choferes antes de guardar el reporte semanal.';
+  const saveButton = $('#save-personnel-weekly-report');
+  saveButton.disabled = !count;
+  saveButton.textContent = count ? `Guardar reporte semanal (${count})` : 'Guardar reporte semanal';
+  body.innerHTML = count
+    ? personnelDraftItems.map((item, index) => `<tr><td><strong>${esc(item.driverName)}</strong><br><small>${new Date(`${item.effectiveDate}T12:00:00`).toLocaleDateString('es-MX')}</small></td><td>${item.unitNumber ? `Unidad ${esc(item.unitNumber)}` : '<small>Sin unidad</small>'}</td><td>${esc(personnelMovementLabel(item.movementType))}<br><small>${esc(item.assignmentType === 'temporary' ? 'Temporal' : item.assignmentType === 'permanent' ? 'Permanente' : 'No aplica')}</small></td><td>${esc(item.reason)}${item.notes ? `<br><small>${esc(item.notes)}</small>` : ''}</td><td><button class="personnel-draft-remove" type="button" data-personnel-draft-index="${index}">Quitar</button></td></tr>`).join('')
+    : '<tr class="empty"><td colspan="5">Aún no hay movimientos agregados a la lista.</td></tr>';
+}
 function reconciliationStatusText(row) {
   if (row.status === 'ready') return 'Datos completos';
   if (row.status === 'no_fuel_records') return 'Sin cargas en periodo';
@@ -549,30 +563,43 @@ $('#personnel-control-form').addEventListener('submit', async (event) => {
     error.textContent = 'Completa el tipo de movimiento, el chofer y el motivo antes de guardar.';
     return;
   }
-  const button = $('#save-personnel-report');
+  personnelDraftItems.push({
+    movementType,
+    effectiveDate: $('#personnel-effective-date').value,
+    assignmentType: $('#personnel-assignment-type').value,
+    driverId: personnelSelectedDriver?.id || '',
+    driverName,
+    unitId: personnelSelectedUnit?.id || '',
+    unitNumber,
+    reason,
+    notes: $('#personnel-notes').value.trim()
+  });
+  resetPersonnelForm();
+  renderPersonnelDraft();
+  showToast('Movimiento agregado a la lista del reporte semanal.');
+});
+$('#personnel-draft-body').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-personnel-draft-index]');
+  if (!button) return;
+  personnelDraftItems.splice(Number(button.dataset.personnelDraftIndex), 1);
+  renderPersonnelDraft();
+});
+$('#save-personnel-weekly-report').addEventListener('click', async () => {
+  if (!personnelDraftItems.length) return;
+  const button = $('#save-personnel-weekly-report');
   button.disabled = true;
+  $('#personnel-control-error').textContent = '';
   try {
-    const response = await fetch('/api/personnel-control', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        movementType,
-        effectiveDate: $('#personnel-effective-date').value,
-        assignmentType: $('#personnel-assignment-type').value,
-        driverId: personnelSelectedDriver?.id || '',
-        driverName,
-        unitId: personnelSelectedUnit?.id || '',
-        unitNumber,
-        reason,
-        notes: $('#personnel-notes').value.trim()
-      })
-    });
+    const response = await fetch('/api/personnel-control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: personnelDraftItems }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No fue posible guardar el reporte semanal.');
-    resetPersonnelForm();
+    const savedCount = Number(data.savedCount || personnelDraftItems.length);
+    personnelDraftItems = [];
+    renderPersonnelDraft();
     await loadPersonnelReports();
-    showToast('Reporte semanal guardado como pendiente de revisión.');
+    showToast(`Reporte semanal guardado con ${savedCount} movimiento${savedCount === 1 ? '' : 's'} pendiente${savedCount === 1 ? '' : 's'} de revisión.`);
   } catch (requestError) {
-    error.textContent = requestError.message || 'No fue posible guardar el reporte semanal.';
+    $('#personnel-control-error').textContent = requestError.message || 'No fue posible guardar el reporte semanal.';
   } finally { button.disabled = false; }
 });
 $('#personnel-movement-filter').addEventListener('change', () => void loadPersonnelReports().catch((error) => showToast(error.message || 'No fue posible filtrar los movimientos.')));
@@ -1138,10 +1165,11 @@ async function synchronizeWithDatabase() {
       fuelPurchases = [];
       fuelInventoryMovements = [];
       personnelReports = [];
+      personnelDraftItems = [];
       localStorage.removeItem(STORAGE.units);
       localStorage.removeItem(STORAGE.drivers);
       localStorage.removeItem(STORAGE.records);
-      renderUnitCatalog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements(); renderPersonnelControl();
+      renderUnitCatalog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements(); renderPersonnelControl(); renderPersonnelDraft();
       return;
     }
     const [unitsResponse, driversResponse, inventoryResponse] = await Promise.all([fetch('/api/units'), fetch('/api/drivers'), fetch('/api/fuel-inventory')]);
@@ -1194,6 +1222,7 @@ $('#logout-button').addEventListener('click', async () => {
   fuelPurchases = [];
   fuelInventoryMovements = [];
   personnelReports = [];
+  personnelDraftItems = [];
   units = [];
   drivers = [];
   fuelInventory = [];
@@ -1208,8 +1237,9 @@ $('#logout-button').addEventListener('click', async () => {
   renderFuelPurchases();
   renderFuelInventoryMovements();
   renderPersonnelControl();
+  renderPersonnelDraft();
   location.hash = '#registro';
   showToast('Sesión cerrada.');
 });
 
-setAdminInterface(false); setDefaultReconciliationRange(); resetPersonnelForm(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements(); renderPersonnelControl(); updateFuelSourceFields(); updateReview(); synchronizeWithDatabase();
+setAdminInterface(false); setDefaultReconciliationRange(); resetPersonnelForm(); renderUnitCatalog(); renderReconciliationUnitOptions(); renderDriverAssignmentOptions(); renderRecords(); renderReconciliation(); renderDriverAssignmentLog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements(); renderPersonnelControl(); renderPersonnelDraft(); updateFuelSourceFields(); updateReview(); synchronizeWithDatabase();

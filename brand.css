@@ -224,6 +224,12 @@ th { background: #eef2ff; color: #324a91; }
 .personnel-actions .primary-button { min-height: 44px; white-space: nowrap; }
 .support-inline-link { color: #176747; font-size: 13px; font-weight: 800; text-decoration: none; }
 .support-inline-link:hover { text-decoration: underline; }
+.personnel-draft-list { margin-top: 20px; padding: 19px; border: 1px solid #c7d6f3; border-radius: 12px; background: #f8faff; }
+.personnel-draft-list .records-heading { margin-bottom: 13px; }
+.personnel-draft-list h3 { margin: 0; color: var(--ink); font: 700 18px Outfit, sans-serif; }
+.personnel-draft-table { min-width: 760px; }
+.personnel-draft-remove { border: 1px solid #efb8bf; border-radius: 7px; background: #fff1f3; color: #a41528; font: 700 12px "DM Sans", sans-serif; padding: 7px 9px; cursor: pointer; }
+.personnel-draft-remove:hover { background: #ffe5e9; }
 .personnel-log { margin-top: 28px; }
 .personnel-filters { display: flex; gap: 11px; align-items: end; margin: 0 0 14px; padding: 13px; border: 1px solid #d7def0; border-radius: 10px; background: #f7f9ff; }
 .personnel-filters label { flex: 0 1 240px; margin: 0; color: #1b3277; }
@@ -254,6 +260,7 @@ th { background: #eef2ff; color: #324a91; }
   .fuel-adjustment-form .adjustment-reason, .fuel-adjustment-form .secondary-button { grid-column: 1 / -1; }
   .personnel-control-form { grid-template-columns: 1fr 1fr; }
   .personnel-filters { flex-wrap: wrap; }
+  .personnel-draft-list .records-heading { align-items: flex-start; gap: 12px; }
 }
 @media (max-width: 530px) {
   .topbar .brand img { max-width: 106px; height: 47px; }
@@ -284,6 +291,8 @@ th { background: #eef2ff; color: #324a91; }
   .personnel-wide { grid-column: auto; }
   .personnel-actions { grid-column: auto; flex-direction: column; align-items: stretch; }
   .personnel-actions .primary-button { width: 100%; }
+  .personnel-draft-list .records-heading { flex-direction: column; }
+  .personnel-draft-list .primary-button { width: 100%; }
   .personnel-filters { display: grid; grid-template-columns: 1fr; }
   .personnel-filters label { max-width: none; }
   .personnel-filters .filter-link { margin-top: 0; justify-self: start; }
