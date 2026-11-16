@@ -2,17 +2,17 @@ const STORAGE = { units: 'cc-units-v2', records: 'cc-fuel-records-v2', drivers: 
 function createUnitId(number) {
   return `unit-${number.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
 }
-const defaultUnits = window.CC_UNIT_DATA.map(([number, serial, description]) => ({
+const defaultUnits = (window.CC_UNIT_DATA || []).map(([number, serial, description]) => ({
   id: createUnitId(number),
   number,
   plates: serial ? `S/N: ${serial}` : 'Sin identificador',
   description
 }));
 const $ = (selector) => document.querySelector(selector);
-let units = load(STORAGE.units, defaultUnits);
+let units = [];
 let records = [];
 try { localStorage.removeItem(STORAGE.records); } catch { /* Los registros sólo se consultan con sesión. */ }
-let drivers = load(STORAGE.drivers, []);
+let drivers = [];
 let selectedUnit = null;
 let selectedDriver = null;
 let assignmentUnit = null;
@@ -921,6 +921,8 @@ $('#unit-form').addEventListener('submit', async (event) => {
 function setAdminInterface(authenticated, role = null) {
   isAdmin = authenticated;
   userRole = authenticated ? role : null;
+  $('#app-content').hidden = !authenticated;
+  $('#register-link').hidden = !authenticated;
   $('#registros').hidden = !authenticated;
   $('#records-link').hidden = !authenticated;
   $('#conciliacion').hidden = !authenticated;
@@ -937,17 +939,36 @@ function setAdminInterface(authenticated, role = null) {
   $('#login-button').hidden = authenticated;
   $('#logout-button').hidden = !authenticated;
 }
+function openLoginDialog() {
+  $('#login-error').textContent = '';
+  if (!$('#login-dialog').open) $('#login-dialog').showModal();
+  $('#login-email').focus();
+}
 async function updateSession() {
   try {
     const response = await fetch('/api/auth/status');
     const data = await response.json();
     setAdminInterface(Boolean(data.authenticated), data.role);
-  } catch { setAdminInterface(false); }
+    if (!data.authenticated) openLoginDialog();
+  } catch { setAdminInterface(false); openLoginDialog(); }
   return isAdmin;
 }
 async function synchronizeWithDatabase() {
   try {
     const admin = await updateSession();
+    if (!admin) {
+      units = [];
+      drivers = [];
+      records = [];
+      fuelInventory = [];
+      fuelPurchases = [];
+      fuelInventoryMovements = [];
+      localStorage.removeItem(STORAGE.units);
+      localStorage.removeItem(STORAGE.drivers);
+      localStorage.removeItem(STORAGE.records);
+      renderUnitCatalog(); renderFuelInventory(); renderFuelPurchases(); renderFuelInventoryMovements();
+      return;
+    }
     const [unitsResponse, driversResponse, inventoryResponse] = await Promise.all([fetch('/api/units'), fetch('/api/drivers'), fetch('/api/fuel-inventory')]);
     if (unitsResponse.ok) { units = await unitsResponse.json(); save(STORAGE.units, units); }
     if (driversResponse.ok) { drivers = await driversResponse.json(); save(STORAGE.drivers, drivers); }
@@ -955,23 +976,8 @@ async function synchronizeWithDatabase() {
     renderReconciliationUnitOptions();
     renderDriverAssignmentOptions();
     renderFuelInventory();
-    if (admin) {
-      if (!$('#reconciliation-date-from').value || !$('#reconciliation-date-to').value) setDefaultReconciliationRange();
-      await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog(), loadFuelPurchases(), loadFuelInventoryMovements()]);
-    } else {
-      records = [];
-      recordsPagination = { page: 1, limit: recordsPageSize, total: 0, totalPages: 1 };
-      localStorage.removeItem(STORAGE.records);
-      renderRecords();
-      reconciliationData = null;
-      renderReconciliation();
-      driverAssignmentLog = [];
-      renderDriverAssignmentLog();
-      fuelPurchases = [];
-      renderFuelPurchases();
-      fuelInventoryMovements = [];
-      renderFuelInventoryMovements();
-    }
+    if (!$('#reconciliation-date-from').value || !$('#reconciliation-date-to').value) setDefaultReconciliationRange();
+    await Promise.all([loadRecordsPage(1), loadReconciliation(), loadDriverAssignmentLog(), loadFuelPurchases(), loadFuelInventoryMovements()]);
     renderUnitCatalog(); updateReview();
   } catch { /* El sitio muestra el catálogo inicial hasta que PostgreSQL esté conectado. */ }
 }
@@ -984,9 +990,7 @@ $('#records-link').addEventListener('click', (event) => {
   $('#login-email').focus();
 });
 $('#login-button').addEventListener('click', () => {
-  $('#login-error').textContent = '';
-  $('#login-dialog').showModal();
-  $('#login-email').focus();
+  openLoginDialog();
 });
 $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -1013,10 +1017,17 @@ $('#logout-button').addEventListener('click', async () => {
   driverAssignmentLog = [];
   fuelPurchases = [];
   fuelInventoryMovements = [];
+  units = [];
+  drivers = [];
+  fuelInventory = [];
   localStorage.removeItem(STORAGE.records);
+  localStorage.removeItem(STORAGE.units);
+  localStorage.removeItem(STORAGE.drivers);
   setAdminInterface(false);
   renderRecords();
   renderReconciliation();
+  renderUnitCatalog();
+  renderFuelInventory();
   renderFuelPurchases();
   renderFuelInventoryMovements();
   location.hash = '#registro';

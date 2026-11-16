@@ -266,8 +266,8 @@ function sessionHash(token) { return crypto.createHash('sha256').update(token).d
 function secureEquals(left, right) { const leftBuffer = Buffer.from(left || ''), rightBuffer = Buffer.from(right || ''); return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer); }
 async function getSession(request) {
   const token = parseCookies(request).admin_session;
-  if (!token || !pool) return null;
-  const result = await pool.query("SELECT COALESCE(role, 'admin') AS role, email FROM admin_sessions WHERE token_hash = $1 AND expires_at > NOW()", [sessionHash(token)]);
+  if (!token || !pool || !process.env.ADMIN_EMAIL) return null;
+  const result = await pool.query("SELECT 'admin' AS role, email FROM admin_sessions WHERE token_hash = $1 AND expires_at > NOW() AND LOWER(email) = LOWER($2)", [sessionHash(token), process.env.ADMIN_EMAIL]);
   return result.rows[0] || null;
 }
 async function isAdmin(request) { return (await getSession(request))?.role === 'admin'; }
@@ -545,10 +545,8 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
     if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) { sendJson(response, 503, { error: 'Falta configurar ADMIN_EMAIL y ADMIN_PASSWORD en Railway.' }); return true; }
     const body = await readJson(request), email = cleanText(body.email, 160).toLowerCase(), password = typeof body.password === 'string' ? body.password : '';
-    let role = null;
-    if (secureEquals(email, process.env.ADMIN_EMAIL.toLowerCase()) && secureEquals(password, process.env.ADMIN_PASSWORD)) role = 'admin';
-    else if (process.env.OPERATIONS_EMAIL && process.env.OPERATIONS_PASSWORD && secureEquals(email, process.env.OPERATIONS_EMAIL.toLowerCase()) && secureEquals(password, process.env.OPERATIONS_PASSWORD)) role = 'operator';
-    if (!role) { sendJson(response, 401, { error: 'Correo o contraseña incorrectos.' }); return true; }
+    if (!secureEquals(email, process.env.ADMIN_EMAIL.toLowerCase()) || !secureEquals(password, process.env.ADMIN_PASSWORD)) { sendJson(response, 401, { error: 'Correo o contraseña incorrectos.' }); return true; }
+    const role = 'admin';
     const token = crypto.randomBytes(32).toString('base64url');
     await pool.query('DELETE FROM admin_sessions WHERE expires_at < NOW()');
     await pool.query('INSERT INTO admin_sessions (token_hash, role, email, expires_at) VALUES ($1, $2, $3, NOW() + INTERVAL \'12 hours\')', [sessionHash(token), role, email]);
@@ -560,6 +558,7 @@ async function handleApi(request, response, url) {
     if (token) await pool.query('DELETE FROM admin_sessions WHERE token_hash = $1', [sessionHash(token)]);
     response.writeHead(204, { 'Set-Cookie': 'admin_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0' }); response.end(); return true;
   }
+  if (!await requireStaff(request, response)) return true;
   if (url.pathname === '/api/motive/status' && request.method === 'GET') {
     const connection = await pool.query('SELECT connected_at AS "connectedAt", last_synced_at AS "lastSyncedAt" FROM motive_connection WHERE id = TRUE');
     sendJson(response, 200, { configured: motiveConfigured(), connected: Boolean(connection.rowCount), ...(connection.rows[0] || {}) });
@@ -874,7 +873,7 @@ function serveStatic(request, response, url) {
   if (!['GET', 'HEAD'].includes(request.method)) { response.writeHead(405); response.end(); return; }
   const requestedPath = url.pathname === '/' ? '/index.html' : url.pathname;
   const filePath = path.resolve(publicDirectory, `.${decodeURIComponent(requestedPath)}`);
-  const allowed = filePath === path.join(publicDirectory, 'index.html') || filePath === path.join(publicDirectory, 'app.js') || filePath === path.join(publicDirectory, 'units.js') || filePath === path.join(publicDirectory, 'styles.css') || filePath === path.join(publicDirectory, 'brand.css') || filePath.startsWith(path.join(publicDirectory, 'assets') + path.sep);
+  const allowed = filePath === path.join(publicDirectory, 'index.html') || filePath === path.join(publicDirectory, 'app.js') || filePath === path.join(publicDirectory, 'styles.css') || filePath === path.join(publicDirectory, 'brand.css') || filePath.startsWith(path.join(publicDirectory, 'assets') + path.sep);
   if (!allowed) { response.writeHead(404); response.end('Página no encontrada.'); return; }
   fs.readFile(filePath, (error, content) => {
     if (error) { response.writeHead(error.code === 'ENOENT' ? 404 : 500); response.end(error.code === 'ENOENT' ? 'Página no encontrada.' : 'Error del servidor.'); return; }

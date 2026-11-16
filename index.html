@@ -20,7 +20,7 @@
         <span>Transport<br /><small>Control de diésel</small></span>
       </a>
       <nav aria-label="Navegación principal">
-        <a class="active" href="#registro">Registrar carga</a>
+        <a id="register-link" class="active" href="#registro" hidden>Registrar carga</a>
         <a id="records-link" href="#registros" hidden>Registros</a>
         <a id="reconciliation-link" href="#conciliacion" hidden>Conciliación</a>
         <a id="fuel-inventory-link" href="#inventario-diesel" hidden>Inventario diésel</a>
@@ -31,7 +31,7 @@
       </nav>
     </header>
 
-    <main>
+    <main id="app-content" hidden>
       <section id="registro" class="page-heading">
         <div>
           <p class="eyebrow">Nueva evidencia</p>
@@ -335,9 +335,9 @@
     </dialog>
     <dialog id="login-dialog" class="confirmation-dialog login-dialog">
       <form method="dialog"><button class="close-dialog" value="cancel" aria-label="Cerrar">×</button></form>
-      <p class="eyebrow">Acceso administrativo</p>
-      <h2>Ver registros</h2>
-      <p class="muted">Inicia sesión para consultar y exportar las cargas registradas.</p>
+      <p class="eyebrow">Acceso privado</p>
+      <h2>Control de diésel</h2>
+      <p class="muted">Inicia sesión para acceder a la plataforma.</p>
       <form id="login-form" class="login-form">
         <div><label for="login-email">Correo</label><input id="login-email" type="email" autocomplete="username" required /></div>
         <div><label for="login-password">Contraseña</label><input id="login-password" type="password" autocomplete="current-password" required /></div>
@@ -346,7 +346,6 @@
       </form>
     </dialog>
     <div id="toast" class="toast" role="status"></div>
-    <script src="units.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
