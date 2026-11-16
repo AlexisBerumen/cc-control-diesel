@@ -163,12 +163,12 @@ function screenshot(slide, imagePath, x, y, w, h) {
 {
   const s = pptx.addSlide();
   s.background = { color: C.paper };
-  header(s, 'Inventario', 'Control de existencias por origen de carga', 6);
-  addText(s, 'El piloto distingue las dos bombas de la empresa y las cargas externas con tarjeta Pilot.', 0.62, 1.25, 9.2, 0.3, { fontSize: 16, color: C.muted });
+  header(s, 'Inventario y tarjetas', 'Control de existencias y uso autorizado de Pilot', 6);
+  addText(s, 'El piloto distingue las dos bombas de la empresa y las cargas externas con tarjeta Pilot, bajo controles de autorización.', 0.62, 1.25, 10.8, 0.3, { fontSize: 16, color: C.muted });
   const tanks = [
     ['Hobbs', 'Bomba C&C', 'Las compras suman galones y cada carga descuenta del saldo.', C.navy],
     ['Orla', 'Bomba C&C', 'Mismo control independiente para anticipar reabasto.', C.blue],
-    ['Pilot', 'Carga externa', 'Ubicación e importe obligatorios; no afecta inventario local.', C.red]
+    ['Pilot', 'Tarjeta de combustible', 'Uso exclusivo de personal autorizado. Para solicitar una tarjeta se requiere autorización previa.', C.red]
   ];
   tanks.forEach(([name, type, detail, color], i) => {
     const x = 0.72 + (i * 4.12);
@@ -179,7 +179,7 @@ function screenshot(slide, imagePath, x, y, w, h) {
     addText(s, detail, x + 0.28, 3.45, 2.92, 0.63, { fontSize: 12.5, color: C.ink, breakLine: true });
   });
   addRect(s, 0.72, 5.25, 11.8, 0.92, C.navy, C.navy, 0.13);
-  addText(s, 'Compras + cargas de unidad + ajustes autorizados = bitácora completa por bomba', 0.98, 5.54, 11.25, 0.2, { fontSize: 16, color: C.white, bold: true, align: 'center' });
+  addText(s, 'Pilot: tarjeta solo para personal autorizado; toda solicitud requiere autorización previa.', 0.98, 5.54, 11.25, 0.2, { fontSize: 16, color: C.white, bold: true, align: 'center' });
 }
 
 // 7. Motive and reconciliation
